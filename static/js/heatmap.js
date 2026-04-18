@@ -1251,6 +1251,53 @@ function buildHeatmapQuery() {
   return `?${params.toString()}`;
 }
 
+// ── Location code parsing ─────────────────────────────────────────────────
+// Mirrors itemtracker's parseHeatmapLocation exactly:
+// strip non-digits from position 2 onwards, then bay=0-2, level=2-4, slot=4-6
+function parseLocationCode(loc) {
+  const text   = String(loc || "").trim().toUpperCase();
+  const digits = text.slice(2).replace(/\D+/g, "");
+  if (text.length < 4 || digits.length < 4) return null;
+  return {
+    aisle_prefix: text.slice(0, 2),
+    bay:          digits.slice(0, 2),
+    level:        digits.slice(2, 4),
+    slot:         digits.slice(4, 6),
+  };
+}
+
+// Expand heatmap.rows to include every location present in overrides.locations
+// that has no pick activity — these appear in the scene with pick_count=0.
+function augmentRowsFromOverrides(heatmap) {
+  const overrideLocations = heatmap.overrides?.locations;
+  if (!overrideLocations) return;
+
+  const existingLocs = new Set((heatmap.rows || []).map(r => r.location));
+  const phantomRows  = [];
+
+  for (const loc of Object.keys(overrideLocations)) {
+    if (existingLocs.has(loc)) continue;
+    const parsed = parseLocationCode(loc);
+    if (!parsed) continue;
+    phantomRows.push({
+      location:     loc,
+      aisle_prefix: parsed.aisle_prefix,
+      bay:          parsed.bay,
+      level:        parsed.level,
+      slot:         parsed.slot,
+      pick_count:   0,
+      pick_qty:     0,
+      picker_count: 0,
+      top_skus:     [],
+      sku:          "",
+      bin_size:     "",
+      zone_key:     "",
+    });
+  }
+
+  heatmap.rows.push(...phantomRows);
+}
+
 async function loadHeatmap() {
   syncModeUi();
   setStatus("Loading heatmap...");

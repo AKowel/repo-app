@@ -7,6 +7,7 @@ const COLLECTIONS = {
   pick_activity:    "warehouse_pick_activity_snapshots",
   order_lines:      "warehouse_order_line_snapshots",
   pick_transactions:"warehouse_pick_transaction_snapshots",
+  binloc:           "warehouse_binloc_snapshots",
 };
 
 // TTLs in milliseconds
@@ -56,15 +57,21 @@ class SnapshotService {
     return name;
   }
 
+  isWarehouseScopedCollection(collectionKey) {
+    return collectionKey === "binloc";
+  }
+
   async listSnapshotDates(collectionKey, clientCode) {
     const col = this.collectionName(collectionKey);
-    const filter = `client_code=${pbLiteral(clientCode)}`;
+    const filter = this.isWarehouseScopedCollection(collectionKey)
+      ? undefined
+      : `client_code=${pbLiteral(clientCode)}`;
     const records = await this.pb.listAllRecords(col, { filterExpr: filter, sort: "-snapshot_date", perPage: 400 });
-    return records
-      .map(r => r.snapshot_date)
-      .filter(Boolean)
-      .sort()
-      .reverse();
+    return [...new Set(
+      records
+        .map(r => r.snapshot_date)
+        .filter(Boolean)
+    )].sort().reverse();
   }
 
   // ── Snapshot loading + cache ──────────────────────────────────────────────
@@ -87,8 +94,11 @@ class SnapshotService {
     return entry;
   }
 
-  async _fetchSnapshotRecord(col, clientCode, snapshotDate) {
-    let filterParts = [`client_code=${pbLiteral(clientCode)}`];
+  async _fetchSnapshotRecord(collectionKey, col, clientCode, snapshotDate) {
+    let filterParts = [];
+    if (!this.isWarehouseScopedCollection(collectionKey)) {
+      filterParts.push(`client_code=${pbLiteral(clientCode)}`);
+    }
     let sort = "-uploaded_at";
     if (snapshotDate) {
       filterParts.push(`snapshot_date=${pbLiteral(snapshotDate)}`);
@@ -96,7 +106,7 @@ class SnapshotService {
       sort = "-snapshot_date,-uploaded_at";
     }
     const response = await this.pb.listRecords(col, {
-      filterExpr: filterParts.join(" && "),
+      filterExpr: filterParts.length ? filterParts.join(" && ") : undefined,
       sort,
       perPage: 1,
     });
@@ -111,7 +121,7 @@ class SnapshotService {
     if (cached) return { rows: cached.rows, meta: cached.meta, fromCache: true };
 
     const col    = this.collectionName(collectionKey);
-    const record = await this._fetchSnapshotRecord(col, clientCode, resolvedDate);
+    const record = await this._fetchSnapshotRecord(collectionKey, col, clientCode, resolvedDate);
 
     if (!record) {
       return { rows: [], meta: null, fromCache: false };

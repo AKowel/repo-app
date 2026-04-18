@@ -3,6 +3,7 @@ const { config }          = require("../server/config");
 const { PocketBaseClient } = require("../server/pocketbaseClient");
 
 const REQUIRED = [
+  "warehouse_binloc_snapshots",
   "warehouse_pick_activity_snapshots",
   "warehouse_order_line_snapshots",
   "warehouse_pick_transaction_snapshots",

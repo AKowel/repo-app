@@ -1,0 +1,109 @@
+<%- include('partials/head', { pageTitle: 'Reports' }) %>
+<div class="app-shell">
+<%- include('partials/header', { activePage: 'reports' }) %>
+<main class="app-main">
+<div class="page">
+
+  <!-- Hero -->
+  <div class="page-hero">
+    <div class="page-hero__eyebrow">Picking Reports</div>
+    <h1 class="page-hero__title">Warehouse Pick Analysis</h1>
+    <div class="page-hero__chips">
+      <span class="chip" id="rChipClient"></span>
+      <span class="chip" id="rChipRange"></span>
+      <span class="chip" id="rChipCoverage"></span>
+      <span class="chip" id="rChipQty"></span>
+      <span class="chip" id="rChipLines"></span>
+      <span class="chip chip--status" id="rChipStatus"></span>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="card">
+    <div class="toolbar">
+      <div class="toolbar__group">
+        <label class="field-label" for="rSelClient">Client</label>
+        <select class="field field--select" id="rSelClient">
+          <% clientChoices.forEach(c => { %>
+            <option value="<%= c.code %>" <%= c.code === selectedClient ? 'selected' : '' %>><%= c.name %></option>
+          <% }) %>
+        </select>
+      </div>
+      <div class="toolbar__group">
+        <label class="field-label" for="rSelMode">Report window</label>
+        <select class="field field--select" id="rSelMode">
+          <option value="latest">Latest day</option>
+          <option value="date">Specific date</option>
+          <option value="custom">Custom range</option>
+        </select>
+      </div>
+      <div class="toolbar__group" id="rGrpDate" style="display:none">
+        <label class="field-label" for="rInpDate">Date</label>
+        <input class="field" type="date" id="rInpDate" />
+      </div>
+      <div class="toolbar__group" id="rGrpRange" style="display:none">
+        <label class="field-label" for="rInpStart">From</label>
+        <input class="field" type="date" id="rInpStart" />
+      </div>
+      <div class="toolbar__group" id="rGrpRangeEnd" style="display:none">
+        <label class="field-label" for="rInpEnd">To</label>
+        <input class="field" type="date" id="rInpEnd" />
+      </div>
+      <div class="toolbar__group">
+        <label class="field-label">Channels</label>
+        <div class="reports-channel-picker" id="rChannelPicker">
+          <button type="button" class="reports-channel-picker__trigger field" id="rChannelTrigger">All channels</button>
+          <div class="reports-channel-picker__dropdown" id="rChannelDropdown" hidden></div>
+        </div>
+      </div>
+      <div class="toolbar__group">
+        <label class="field-label" for="rSelLimit">Top SKUs</label>
+        <select class="field field--select" id="rSelLimit">
+          <option value="10">10</option>
+          <option value="25" selected>25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+      <div class="toolbar__group">
+        <label class="field-label" for="rSelRankBy">Rank by</label>
+        <select class="field field--select" id="rSelRankBy">
+          <option value="pick_qty">Pick qty</option>
+          <option value="line_count">Line count</option>
+        </select>
+      </div>
+      <div class="toolbar__actions">
+        <button class="btn btn--primary btn--sm" id="rBtnLoad">Reload</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="reports-tabs" id="rTabs">
+    <button class="reports-tab-btn reports-tab-btn--active" data-tab="overview">Overview</button>
+    <button class="reports-tab-btn" data-tab="skus">Top SKUs</button>
+    <button class="reports-tab-btn" data-tab="locations">Locations</button>
+    <button class="reports-tab-btn" data-tab="aisles">Aisles</button>
+    <button class="reports-tab-btn" data-tab="structure">Structure</button>
+    <button class="reports-tab-btn" data-tab="channels">Channels</button>
+    <button class="reports-tab-btn" data-tab="replenishment">Replenishment</button>
+    <button class="reports-tab-btn" data-tab="pc-zone">PC Zone</button>
+    <button class="reports-tab-btn" data-tab="daily">Daily</button>
+  </div>
+
+  <div id="rTab-overview"      class="reports-tab-content reports-tab-content--active card"></div>
+  <div id="rTab-skus"          class="reports-tab-content card"></div>
+  <div id="rTab-locations"     class="reports-tab-content card"></div>
+  <div id="rTab-aisles"        class="reports-tab-content card"></div>
+  <div id="rTab-structure"     class="reports-tab-content card"></div>
+  <div id="rTab-channels"      class="reports-tab-content card"></div>
+  <div id="rTab-replenishment" class="reports-tab-content card"></div>
+  <div id="rTab-pc-zone"       class="reports-tab-content card"></div>
+  <div id="rTab-daily"         class="reports-tab-content card"></div>
+
+</div>
+</main>
+</div>
+<script src="/js/site.js"></script>
+<link rel="stylesheet" href="/css/reports.css" />
+<script src="/js/reports.js"></script>
