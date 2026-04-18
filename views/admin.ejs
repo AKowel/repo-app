@@ -1,0 +1,104 @@
+<%- include('partials/head', { pageTitle: 'Admin' }) %>
+<div class="app-shell">
+<%- include('partials/header', { activePage: 'admin' }) %>
+<main class="app-main">
+<div class="page">
+
+  <div class="page-hero">
+    <div class="page-hero__eyebrow">System</div>
+    <h1 class="page-hero__title">Admin Panel</h1>
+    <div class="page-hero__chips">
+      <span class="chip" id="chipUptime">—</span>
+      <span class="chip" id="chipPb">—</span>
+      <span class="chip" id="chipNode">—</span>
+    </div>
+  </div>
+
+  <!-- Status + Cache row -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+    <!-- PocketBase status -->
+    <div class="card">
+      <div class="card__head">
+        <div class="card__title">PocketBase Connection</div>
+        <button class="btn btn--ghost btn--sm" onclick="loadStatus()">Refresh</button>
+      </div>
+      <div class="card__body" id="pbStatus">
+        <div class="loading-row"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+    <!-- Server info -->
+    <div class="card">
+      <div class="card__head"><div class="card__title">Server Info</div></div>
+      <div class="card__body" id="serverInfo">
+        <div class="loading-row"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Snapshot summary -->
+  <div class="card" style="margin-top:16px">
+    <div class="card__head">
+      <div class="card__title">Snapshot Summary</div>
+      <button class="btn btn--ghost btn--sm" onclick="loadSnapshotSummary()">Refresh</button>
+    </div>
+    <div class="card__body--flush" id="snapshotSummary">
+      <div class="loading-row"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <!-- Cache contents -->
+  <div class="card" style="margin-top:16px">
+    <div class="card__head">
+      <div class="card__title">In-Memory Cache</div>
+      <button class="btn btn--ghost btn--sm" onclick="loadStatus()">Refresh</button>
+    </div>
+    <div class="card__body--flush" id="cacheTable">
+      <div class="loading-row"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <!-- Snapshot debugger -->
+  <div class="card" style="margin-top:16px">
+    <div class="card__head">
+      <div class="card__title">Snapshot Debugger</div>
+      <div class="card__subtitle">Inspect what a snapshot file actually contains</div>
+    </div>
+    <div class="card__body">
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:16px">
+        <div class="field-group">
+          <label class="field-label">Collection</label>
+          <select class="field field--select" id="dbgCollection" style="width:200px">
+            <option value="pick_activity">Pick Activity</option>
+            <option value="order_lines">Order Lines</option>
+            <option value="pick_transactions">Pick Transactions</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">Client</label>
+          <select class="field field--select" id="dbgClient" style="width:160px">
+            <% clientChoices.forEach(c => { %>
+              <option value="<%= c.code %>"><%= c.name %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">Date (leave blank for latest)</label>
+          <input class="field" type="date" id="dbgDate" style="width:180px" />
+        </div>
+        <button class="btn btn--primary" onclick="runDebug()">Inspect</button>
+      </div>
+      <div id="dbgResult"></div>
+    </div>
+  </div>
+
+</div>
+</main>
+</div>
+
+<script src="/js/site.js"></script>
+<script src="/js/admin.js"></script>
+</body>
+</html>

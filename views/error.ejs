@@ -1,0 +1,23 @@
+<%- include('partials/head', { pageTitle: 'Error ' + (error.status || 500) }) %>
+<div class="app-shell">
+<% if (currentUser) { %><%- include('partials/header') %><% } %>
+<main class="app-main">
+<div class="page" style="max-width:600px">
+  <div class="card" style="margin-top:40px">
+    <div class="card__body" style="text-align:center;padding:48px 32px">
+      <div style="font-size:3rem;font-weight:800;color:var(--text-xsoft);margin-bottom:16px">
+        <%= error.status || 500 %>
+      </div>
+      <h1 style="font-size:1.25rem;margin-bottom:8px">Something went wrong</h1>
+      <p style="color:var(--text-soft);margin-bottom:28px"><%= error.message || 'An unexpected error occurred.' %></p>
+      <% if (currentUser) { %>
+        <a href="/heatmap" class="btn btn--primary">← Back to Heatmap</a>
+      <% } else { %>
+        <a href="/login" class="btn btn--primary">← Back to Login</a>
+      <% } %>
+    </div>
+  </div>
+</div>
+</main>
+</div>
+<%- include('partials/footer') %>

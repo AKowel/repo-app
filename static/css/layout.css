@@ -1,0 +1,283 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   LAYOUT — app shell, header, main content area
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── App shell ───────────────────────────────────────────────────────── */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 56px;
+  padding: 0 20px;
+  background: var(--header-bg);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.app-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  text-decoration: none;
+  margin-right: 28px;
+}
+
+.app-header__logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--header-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-header__logo svg {
+  width: 16px;
+  height: 16px;
+  color: #fff;
+}
+
+.app-header__name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--header-active);
+  letter-spacing: -0.01em;
+}
+
+.app-header__nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+}
+
+.app-header__nav-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--header-soft);
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.app-header__nav-link svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.app-header__nav-link:hover,
+.app-header__nav-link:focus-visible {
+  background: rgba(255,255,255,0.08);
+  color: var(--header-active);
+  text-decoration: none;
+}
+
+.app-header__nav-link--active {
+  background: rgba(255,255,255,0.1);
+  color: var(--header-active);
+}
+
+.app-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Theme switcher buttons */
+.theme-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--header-soft);
+  cursor: pointer;
+  font-size: 15px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.theme-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--header-active);
+}
+
+.theme-btn--active {
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(255,255,255,0.18);
+  color: var(--header-active);
+}
+
+.header-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255,255,255,0.12);
+  flex-shrink: 0;
+}
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.header-user__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--header-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.header-user__name {
+  font-size: 0.825rem;
+  font-weight: 500;
+  color: var(--header-text);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-signout {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255,255,255,0.14);
+  background: transparent;
+  color: var(--header-soft);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.header-signout:hover {
+  background: rgba(255,255,255,0.08);
+  color: var(--header-active);
+  text-decoration: none;
+}
+
+.header-signout svg { width: 13px; height: 13px; }
+
+/* ── Main body ───────────────────────────────────────────────────────── */
+.app-main {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ── Page wrapper ────────────────────────────────────────────────────── */
+.page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 28px 24px 60px;
+}
+
+/* ── Page hero (title row) ───────────────────────────────────────────── */
+.page-hero {
+  margin-bottom: 24px;
+}
+
+.page-hero__eyebrow {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.page-hero__title {
+  font-size: 1.625rem;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.025em;
+  margin-bottom: 12px;
+}
+
+.page-hero__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ── Login page layout ───────────────────────────────────────────────── */
+.login-shell {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 24px;
+}
+
+.login-box {
+  width: 100%;
+  max-width: 400px;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.login-brand__logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-brand__logo svg { width: 22px; height: 22px; color: #fff; }
+
+.login-brand__name {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.login-brand__sub {
+  font-size: 0.8rem;
+  color: var(--text-soft);
+}

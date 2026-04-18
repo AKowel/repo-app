@@ -1,0 +1,474 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   HEATMAP — 3D warehouse scene styles
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.heatmap-fullscreen-shell {
+  display: grid;
+  gap: 16px;
+}
+
+/* ── Toolbar card ────────────────────────────────────────────────────── */
+.heatmap-toolbar-card { overflow: hidden; }
+
+.heatmap-toolbar-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.heatmap-level-filter-field { min-width: 260px; }
+
+.heatmap-level-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.heatmap-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+
+.heatmap-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  margin-left: auto;
+}
+
+/* ── Layout grid ─────────────────────────────────────────────────────── */
+.heatmap-layout-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(300px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+/* ── Scene card / canvas ─────────────────────────────────────────────── */
+.heatmap-scene-card { overflow: hidden; }
+
+.heatmap-scene-wrap {
+  position: relative;
+  min-height: 620px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top, rgba(116, 169, 255, 0.16), transparent 42%),
+    linear-gradient(180deg, #0f1f34 0%, #0a1320 100%);
+}
+
+#heatmapCanvas {
+  width: 100%;
+  height: 620px;
+  display: block;
+  cursor: grab;
+}
+
+#heatmapCanvas:active { cursor: grabbing; }
+
+/* ── Scene hint overlay ──────────────────────────────────────────────── */
+.heatmap-scene-hint {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  display: none;
+  gap: 4px;
+  max-width: 320px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  background: rgba(9, 15, 28, 0.82);
+  border: 1px solid rgba(145, 181, 255, 0.22);
+  backdrop-filter: blur(12px);
+  color: rgba(236, 244, 255, 0.94);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.heatmap-scene-hint strong {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 4px;
+}
+
+.heatmap-scene-hint code {
+  font-size: 11px;
+  background: rgba(255,255,255,0.1);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* ── Legend ──────────────────────────────────────────────────────────── */
+.heatmap-legend {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  gap: 8px;
+  min-width: 180px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  background: rgba(9, 15, 28, 0.76);
+  border: 1px solid rgba(145, 181, 255, 0.22);
+  backdrop-filter: blur(12px);
+}
+
+.heatmap-legend__bar {
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3d6fcf 0%, #4fd0c3 45%, #f7c948 74%, #eb5a46 100%);
+}
+
+.heatmap-legend__labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(236, 244, 255, 0.78);
+}
+
+/* ── FPS overlay ─────────────────────────────────────────────────────── */
+.heatmap-fps-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 14;
+  pointer-events: none;
+}
+
+.heatmap-fps-overlay[hidden] { display: none; }
+
+.heatmap-fps-crosshair {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 20px; height: 20px;
+  transform: translate(-50%, -50%);
+}
+
+.heatmap-fps-crosshair::before,
+.heatmap-fps-crosshair::after {
+  content: "";
+  position: absolute;
+  background: rgba(244, 247, 255, 0.9);
+  border-radius: 999px;
+}
+
+.heatmap-fps-crosshair::before {
+  top: 50%; left: 3px; right: 3px; height: 2px;
+  transform: translateY(-50%);
+}
+
+.heatmap-fps-crosshair::after {
+  left: 50%; top: 3px; bottom: 3px; width: 2px;
+  transform: translateX(-50%);
+}
+
+.heatmap-fps-chip,
+.heatmap-fps-help {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(9, 15, 28, 0.82);
+  border: 1px solid rgba(145, 181, 255, 0.22);
+  backdrop-filter: blur(10px);
+  color: rgba(236, 244, 255, 0.94);
+  text-align: center;
+}
+
+.heatmap-fps-chip {
+  top: 16px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.heatmap-fps-help {
+  bottom: 16px;
+  max-width: min(92%, 560px);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* ── Settings panel ──────────────────────────────────────────────────── */
+.heatmap-settings-panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 20;
+  width: 260px;
+  background: rgba(10, 18, 34, 0.92);
+  border: 1px solid rgba(136, 173, 255, 0.25);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  backdrop-filter: blur(14px);
+  display: grid;
+  gap: 14px;
+  box-shadow: var(--shadow-lg);
+}
+
+.heatmap-settings-panel[hidden] { display: none; }
+
+.heatmap-settings-panel__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.heatmap-settings-panel__head strong { color: #f4f7ff; font-size: 0.9rem; }
+
+.heatmap-settings-close {
+  background: transparent;
+  border: 1px solid rgba(136, 173, 255, 0.25);
+  color: rgba(236, 244, 255, 0.7);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.heatmap-settings-close:hover { background: rgba(255,255,255,0.08); color: #fff; }
+
+.heatmap-settings-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  cursor: default;
+}
+
+.heatmap-settings-row span:first-child {
+  font-size: 0.82rem;
+  color: rgba(220, 235, 255, 0.75);
+  white-space: nowrap;
+}
+
+.heatmap-settings-row input[type="range"] {
+  width: 80px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.heatmap-settings-val {
+  font-size: 0.8rem;
+  color: #88aaff;
+  font-weight: 700;
+  min-width: 34px;
+  text-align: right;
+}
+
+.heatmap-settings-reset {
+  background: transparent;
+  border: 1px solid rgba(136, 173, 255, 0.25);
+  color: rgba(236, 244, 255, 0.7);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  justify-self: start;
+}
+
+.heatmap-settings-reset:hover { background: rgba(255,255,255,0.08); color: #fff; }
+
+/* ── Sidebar ─────────────────────────────────────────────────────────── */
+.heatmap-sidebar { overflow: hidden; }
+
+.heatmap-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.heatmap-stat-card {
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.heatmap-stat-card__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-soft);
+  margin-bottom: 4px;
+}
+
+.heatmap-stat-card__value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+
+.heatmap-stat-card__sub {
+  font-size: 0.75rem;
+  color: var(--text-xsoft);
+  margin-top: 3px;
+}
+
+/* ── Snapshot info ───────────────────────────────────────────────────── */
+.heatmap-snapshot-info {
+  display: grid;
+  gap: 5px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 0.83rem;
+}
+
+.heatmap-snapshot-info strong { font-size: 0.875rem; color: var(--text); }
+.heatmap-snapshot-info span   { color: var(--text-soft); line-height: 1.4; }
+
+/* ── Detail card ─────────────────────────────────────────────────────── */
+.heatmap-detail-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.heatmap-detail-card__empty { color: var(--text-soft); font-size: 0.875rem; }
+
+.heatmap-detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.heatmap-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.heatmap-detail-grid div {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.heatmap-detail-grid span {
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.heatmap-detail-grid strong { color: var(--text); font-size: 0.9rem; }
+
+.heatmap-top-skus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ── Hot aisles list ─────────────────────────────────────────────────── */
+.heatmap-hot-aisle {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  margin-bottom: 6px;
+}
+
+.heatmap-hot-aisle:last-child { margin-bottom: 0; }
+
+.heatmap-hot-aisle strong {
+  font-size: 1rem;
+  color: var(--text);
+  min-width: 36px;
+}
+
+.heatmap-hot-aisle span {
+  font-size: 0.82rem;
+  color: var(--text-soft);
+}
+
+/* ── Fullscreen mode ─────────────────────────────────────────────────── */
+.heatmap-fullscreen-shell:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  padding: 16px;
+  box-sizing: border-box;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top, rgba(67, 108, 181, 0.2), transparent 35%),
+    linear-gradient(180deg, #08111c 0%, #0c1728 100%);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-toolbar-card {
+  padding: 14px 18px;
+  background: rgba(10, 18, 31, 0.96);
+  border-color: rgba(145, 181, 255, 0.18);
+  backdrop-filter: blur(14px);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-layout-grid {
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+  align-items: stretch;
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-scene-card,
+.heatmap-fullscreen-shell:fullscreen .heatmap-sidebar {
+  height: 100%;
+  min-height: 0;
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-scene-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-scene-wrap {
+  min-height: 0;
+  height: 100%;
+}
+
+.heatmap-fullscreen-shell:fullscreen #heatmapCanvas { height: 100%; }
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-sidebar {
+  overflow: auto;
+  background: rgba(8, 16, 28, 0.98);
+  border-color: rgba(145, 181, 255, 0.18);
+  backdrop-filter: blur(14px);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-scene-hint { display: grid; }
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .heatmap-layout-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 720px) {
+  .heatmap-toolbar-body { display: grid; grid-template-columns: 1fr; }
+  .heatmap-scene-wrap, #heatmapCanvas { min-height: 420px; height: 420px; }
+  .heatmap-detail-grid { grid-template-columns: repeat(2, 1fr); }
+  .heatmap-stats-grid  { grid-template-columns: 1fr; }
+}

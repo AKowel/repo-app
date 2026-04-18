@@ -1,0 +1,142 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   DESIGN TOKENS
+   All three themes define the exact same set of custom properties.
+   Switching themes = changing data-theme on <html>. Nothing else changes.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Light (default) ─────────────────────────────────────────────────── */
+:root,
+[data-theme="light"] {
+  --bg:           #f0f2f5;
+  --surface:      #ffffff;
+  --surface-2:    #f7f8fa;
+  --surface-3:    #eef0f3;
+  --border:       #e2e6ec;
+  --border-strong:#c8cdd6;
+
+  --text:         #111827;
+  --text-soft:    #6b7280;
+  --text-xsoft:   #9ca3af;
+
+  --accent:       #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-muted: #dbeafe;
+  --accent-fg:    #ffffff;
+
+  --success:      #16a34a;
+  --success-soft: #dcfce7;
+  --success-fg:   #14532d;
+  --warning:      #d97706;
+  --warning-soft: #fef3c7;
+  --warning-fg:   #78350f;
+  --danger:       #dc2626;
+  --danger-soft:  #fee2e2;
+  --danger-fg:    #7f1d1d;
+
+  --heat-zero:    #e8ecf0;
+  --heat-low:     #bfdbfe;
+  --heat-mid:     #f59e0b;
+  --heat-high:    #ef4444;
+
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md:    0 4px 12px rgba(0,0,0,0.09), 0 2px 4px rgba(0,0,0,0.06);
+  --shadow-lg:    0 16px 40px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.07);
+
+  --radius-sm:    6px;
+  --radius-md:    10px;
+  --radius-lg:    14px;
+
+  --header-bg:    #1e3a5f;
+  --header-text:  #e8edf5;
+  --header-soft:  #93a8c4;
+  --header-active:#ffffff;
+  --header-accent:#3b82f6;
+}
+
+/* ── Dark ────────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg:           #0f1117;
+  --surface:      #1a1d27;
+  --surface-2:    #22263a;
+  --surface-3:    #2a2e42;
+  --border:       #2e3347;
+  --border-strong:#404660;
+
+  --text:         #e8eaf0;
+  --text-soft:    #8b92aa;
+  --text-xsoft:   #555d74;
+
+  --accent:       #3b82f6;
+  --accent-hover: #60a5fa;
+  --accent-muted: #1e3a5f;
+  --accent-fg:    #ffffff;
+
+  --success:      #22c55e;
+  --success-soft: #14332b;
+  --success-fg:   #86efac;
+  --warning:      #f59e0b;
+  --warning-soft: #362212;
+  --warning-fg:   #fcd34d;
+  --danger:       #f87171;
+  --danger-soft:  #371a1a;
+  --danger-fg:    #fca5a5;
+
+  --heat-zero:    #1e2336;
+  --heat-low:     #1e3a5f;
+  --heat-mid:     #d97706;
+  --heat-high:    #ef4444;
+
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.25);
+  --shadow-md:    0 4px 12px rgba(0,0,0,0.4),  0 2px 4px rgba(0,0,0,0.3);
+  --shadow-lg:    0 16px 40px rgba(0,0,0,0.5), 0 4px 8px rgba(0,0,0,0.35);
+
+  --header-bg:    #111827;
+  --header-text:  #c9d1e0;
+  --header-soft:  #6b7a96;
+  --header-active:#f0f4ff;
+  --header-accent:#3b82f6;
+}
+
+/* ── Warm ────────────────────────────────────────────────────────────── */
+[data-theme="warm"] {
+  --bg:           #f5f0e8;
+  --surface:      #fffdf8;
+  --surface-2:    #f7f2e8;
+  --surface-3:    #ede8dc;
+  --border:       #ddd5c5;
+  --border-strong:#c4b89e;
+
+  --text:         #1c1410;
+  --text-soft:    #7a6a56;
+  --text-xsoft:   #a89a86;
+
+  --accent:       #b45309;
+  --accent-hover: #92400e;
+  --accent-muted: #fef3c7;
+  --accent-fg:    #ffffff;
+
+  --success:      #15803d;
+  --success-soft: #dcfce7;
+  --success-fg:   #14532d;
+  --warning:      #b45309;
+  --warning-soft: #fef3c7;
+  --warning-fg:   #78350f;
+  --danger:       #b91c1c;
+  --danger-soft:  #fee2e2;
+  --danger-fg:    #7f1d1d;
+
+  --heat-zero:    #ede8dc;
+  --heat-low:     #fed7aa;
+  --heat-mid:     #f59e0b;
+  --heat-high:    #b91c1c;
+
+  --shadow-sm:    0 1px 3px rgba(80,50,20,0.08), 0 1px 2px rgba(80,50,20,0.05);
+  --shadow-md:    0 4px 12px rgba(80,50,20,0.1),  0 2px 4px rgba(80,50,20,0.07);
+  --shadow-lg:    0 16px 40px rgba(80,50,20,0.14),0 4px 8px rgba(80,50,20,0.09);
+
+  --header-bg:    #3b2310;
+  --header-text:  #e8ddd0;
+  --header-soft:  #9e856b;
+  --header-active:#ffffff;
+  --header-accent:#f59e0b;
+}

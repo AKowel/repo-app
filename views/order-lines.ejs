@@ -1,0 +1,118 @@
+<%- include('partials/head', { pageTitle: 'Order Lines' }) %>
+<div class="app-shell">
+<%- include('partials/header', { activePage: 'order-lines' }) %>
+<main class="app-main">
+<div class="page">
+
+  <!-- Hero -->
+  <div class="page-hero">
+    <div class="page-hero__eyebrow">Order Lines</div>
+    <h1 class="page-hero__title">Order Line Report</h1>
+    <div class="page-hero__chips">
+      <span class="chip" id="chipClient"></span>
+      <span class="chip" id="chipDate"></span>
+      <span class="chip" id="chipTotal"></span>
+      <span class="chip" id="chipFiltered"></span>
+    </div>
+  </div>
+
+  <!-- Filters + table card -->
+  <div class="card">
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="toolbar__group">
+        <label class="field-label" for="selClient">Client</label>
+        <select class="field field--select" id="selClient">
+          <% clientChoices.forEach(c => { %>
+            <option value="<%= c.code %>" <%= c.code === selectedClient ? 'selected' : '' %>><%= c.name %></option>
+          <% }) %>
+        </select>
+      </div>
+      <div class="toolbar__group">
+        <label class="field-label" for="selDate">Date</label>
+        <select class="field field--select" id="selDate">
+          <option value="">Loading…</option>
+        </select>
+      </div>
+      <div class="toolbar__group toolbar__group--search">
+        <label class="field-label" for="inpSearch">Search</label>
+        <input class="field" type="search" id="inpSearch" placeholder="Order no, item, customer…" />
+      </div>
+      <div class="toolbar__group">
+        <label class="field-label" for="selChannel">Channel</label>
+        <select class="field field--select" id="selChannel">
+          <option value="">All channels</option>
+        </select>
+      </div>
+      <div class="toolbar__group">
+        <label class="field-label" for="selItemGroup">Item Group</label>
+        <select class="field field--select" id="selItemGroup">
+          <option value="">All groups</option>
+        </select>
+      </div>
+      <div class="toolbar__actions">
+        <button class="btn btn--ghost btn--sm" id="btnReset">Reset</button>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap">
+      <table class="data-table" id="orderTable">
+        <thead>
+          <tr>
+            <th data-col="order_number">Order No <span class="sort-icon">↕</span></th>
+            <th data-col="order_line">Line <span class="sort-icon">↕</span></th>
+            <th data-col="item">Item <span class="sort-icon">↕</span></th>
+            <th data-col="fulfilment_date">Date <span class="sort-icon">↕</span></th>
+            <th data-col="qty_fulfilled">Qty <span class="sort-icon">↕</span></th>
+            <th data-col="item_group">Group <span class="sort-icon">↕</span></th>
+            <th data-col="order_channel">Channel <span class="sort-icon">↕</span></th>
+            <th data-col="customer_name">Customer <span class="sort-icon">↕</span></th>
+            <th data-col="picking_location">Bin <span class="sort-icon">↕</span></th>
+            <th data-col="pick_qty">Pick Qty <span class="sort-icon">↕</span></th>
+          </tr>
+        </thead>
+        <tbody id="orderTableBody">
+          <tr><td colspan="10"><div class="loading-row"><div class="spinner"></div> Loading data…</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Table footer / pagination -->
+    <div class="table-footer">
+      <span class="table-count" id="tableCount">—</span>
+      <div class="table-pagination">
+        <button class="btn btn--ghost btn--sm" id="btnPrev" disabled>← Prev</button>
+        <span id="pageLabel" style="font-size:0.82rem;color:var(--text-soft)">Page 1</span>
+        <button class="btn btn--ghost btn--sm" id="btnNext">Next →</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+</main>
+</div>
+
+<!-- Slide-out drawer -->
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+<div class="drawer" id="transactionDrawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+  <div class="drawer__head">
+    <div>
+      <div class="drawer__title" id="drawerTitle">Pick Transactions</div>
+      <div class="drawer__subtitle" id="drawerSubtitle"></div>
+    </div>
+    <button class="drawer__close" id="drawerClose" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
+  <div class="drawer__body" id="drawerBody">
+    <div class="loading-row"><div class="spinner"></div> Loading transactions…</div>
+  </div>
+</div>
+
+<script src="/js/site.js"></script>
+<script src="/js/order-lines.js"></script>
+</body>
+</html>

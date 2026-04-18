@@ -1,0 +1,57 @@
+<%- include('partials/head', { pageTitle: 'Sign In' }) %>
+
+<div class="login-shell">
+  <div class="login-box">
+    <!-- Brand -->
+    <div class="login-brand">
+      <div class="login-brand__logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+        </svg>
+      </div>
+      <div>
+        <div class="login-brand__name"><%= appName %></div>
+        <div class="login-brand__sub">repo.kewelserver.one</div>
+      </div>
+    </div>
+
+    <!-- Flash -->
+    <% if (flash) { %>
+      <div class="alert alert--<%= flash.type === 'error' ? 'error' : 'success' %>">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <% if (flash.type === 'error') { %>
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          <% } else { %>
+            <polyline points="20 6 9 17 4 12"/>
+          <% } %>
+        </svg>
+        <%- flash.message %>
+      </div>
+    <% } %>
+
+    <!-- Card -->
+    <div class="card">
+      <div class="card__head">
+        <div>
+          <div class="card__title">Warehouse Reporting</div>
+          <div class="card__subtitle">Admin access only</div>
+        </div>
+      </div>
+      <div class="card__body">
+        <form method="POST" action="/login">
+          <div class="field-group" style="margin-bottom:14px">
+            <label class="field-label" for="email">Email address</label>
+            <input class="field" type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email" required />
+          </div>
+          <div class="field-group" style="margin-bottom:20px">
+            <label class="field-label" for="password">Password</label>
+            <input class="field" type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" required />
+          </div>
+          <button type="submit" class="btn btn--primary" style="width:100%">Sign in</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<%- include('partials/footer') %>
