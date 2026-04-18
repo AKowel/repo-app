@@ -15,6 +15,7 @@ function loadJsonFile(filePath) {
 
 const FANDM_LAYOUT     = loadJsonFile(path.join(ITEMTRACKER_DATA, "fandm-layout-v4.7.json"));
 const LAYOUT_OVERRIDES = loadJsonFile(path.join(ITEMTRACKER_DATA, "layout-overrides.json"));
+const ASSET_VERSION    = String(Date.now());
 
 // ── Heatmap helpers ───────────────────────────────────────────────────────────
 
@@ -207,6 +208,7 @@ app.use("/vendor/three", express.static(path.join(__dirname, "..", "node_modules
 // ── Per-request user hydration ────────────────────────────────────────────
 app.use(async (req, res, next) => {
   res.locals.appName    = config.appName;
+  res.locals.assetVersion = ASSET_VERSION;
   res.locals.currentUser = null;
   const userId = req.session && req.session.userId;
   if (userId) {

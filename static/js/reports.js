@@ -88,6 +88,18 @@ function loadingHtml(label) {
   return `<div class="loading-row"><div class="spinner"></div> ${escHtml(label || "Loading...")}</div>`;
 }
 
+function eventElementTarget(event) {
+  const target = event?.target || null;
+  if (target && target.nodeType === 1) return target;
+  return target?.parentElement || null;
+}
+
+function closestFromEvent(event, selector) {
+  const target = eventElementTarget(event);
+  if (!target || typeof target.closest !== "function") return null;
+  return target.closest(selector);
+}
+
 function syncModeUi() {
   const mode = selMode().value;
   grpDate().style.display = mode === "date" ? "" : "none";
@@ -731,12 +743,12 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("rBtnLoad").addEventListener("click", loadReports);
   document.getElementById("rTabs").addEventListener("click", (e) => {
-    const btn = e.target.closest(".reports-tab-btn");
+    const btn = closestFromEvent(e, ".reports-tab-btn");
     if (btn) switchTab(btn.dataset.tab);
   });
 
   document.addEventListener("click", (e) => {
-    const trigger = e.target.closest("[data-report-detail-type]");
+    const trigger = closestFromEvent(e, "[data-report-detail-type]");
     if (!trigger) return;
     openDetailDrawer(trigger.dataset.reportDetailType, trigger.dataset.reportDetailValue);
   });
