@@ -104,6 +104,25 @@
 </div>
 </main>
 </div>
+
+<div class="drawer-backdrop" id="rDetailDrawerBackdrop"></div>
+<div class="drawer" id="rDetailDrawer" role="dialog" aria-modal="true" aria-labelledby="rDetailDrawerTitle">
+  <div class="drawer__head">
+    <div>
+      <div class="drawer__title" id="rDetailDrawerTitle">Report Detail</div>
+      <div class="drawer__subtitle" id="rDetailDrawerSubtitle"></div>
+    </div>
+    <button class="drawer__close" id="rDetailDrawerClose" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
+  <div class="drawer__body" id="rDetailDrawerBody">
+    <div class="loading-row"><div class="spinner"></div> Loading detail…</div>
+  </div>
+</div>
+
 <script src="/js/site.js"></script>
 <link rel="stylesheet" href="/css/reports.css" />
 <script src="/js/reports.js"></script>

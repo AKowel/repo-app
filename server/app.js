@@ -126,6 +126,27 @@ function medianNumber(values) {
   return Math.round(((nums[mid - 1] + nums[mid]) / 2) * 100) / 100;
 }
 
+function resolveSnapshotWindowDates(availableDates, mode, date, start, end, maxDays = 90) {
+  const latestDate = availableDates[0] || null;
+  if (mode === "custom" && start && end) {
+    const s = start < end ? start : end;
+    const e = start < end ? end   : start;
+    return availableDates.filter(d => d >= s && d <= e).slice(0, maxDays);
+  }
+  if (mode === "date" && date) {
+    return availableDates.includes(date) ? [date] : [];
+  }
+  return latestDate ? [latestDate] : [];
+}
+
+function buildOrderItemKey(orderNumber, item) {
+  return `${String(orderNumber || "").trim()}::${String(item || "").trim().toUpperCase()}`;
+}
+
+function buildOrderItemLocationKey(orderNumber, item, location) {
+  return `${buildOrderItemKey(orderNumber, item)}::${String(location || "").trim().toUpperCase()}`;
+}
+
 const CLIENT_CHOICES = [
   { code: "FANDMKET", name: "Fortnum & Mason" },
   { code: "WESTLAND",  name: "Westland" },
@@ -590,6 +611,345 @@ app.get("/api/pick-transactions", requireAdminApi, async (req, res) => {
   }
 });
 
+// ── API: reports detail drawer ────────────────────────────────────────────
+app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
+  const { client, entity, value, mode, date, start, end, channels } = req.query;
+  const targetEntity = entity === "location" ? "location" : (entity === "sku" ? "sku" : "");
+  const targetValue  = targetEntity === "location"
+    ? String(value || "").trim().toUpperCase()
+    : String(value || "").trim().toUpperCase();
+
+  if (!client || !targetEntity || !targetValue) {
+    return res.status(400).json({ ok: false, error: "client, entity and value params required." });
+  }
+
+  try {
+    const availableDates = await service.listSnapshotDates("order_lines", client);
+    const loadedDates    = resolveSnapshotWindowDates(availableDates, mode, date, start, end);
+    const latestDate     = availableDates[0] || null;
+
+    if (!loadedDates.length) {
+      return res.json({
+        ok: true,
+        entity: targetEntity,
+        value: targetValue,
+        meta: {
+          client_code: client,
+          available_dates: availableDates,
+          loaded_dates: [],
+          latest_date: latestDate,
+          date_count: 0,
+          channel_filter: [],
+          pick_transaction_dates_available: [],
+          pick_transaction_dates_loaded: [],
+        },
+        summary: null,
+        order_lines: [],
+        pick_transactions: [],
+        picker_breakdown: [],
+        sku_breakdown: [],
+        location_breakdown: [],
+        sku_detail: null,
+      });
+    }
+
+    const channelFilter = new Set(
+      String(channels || "")
+        .split(",")
+        .map(c => c.trim().toUpperCase())
+        .filter(Boolean)
+    );
+
+    const [orderLineResults, trxAvailableDates, rawBinloc] = await Promise.all([
+      Promise.all(loadedDates.map(d => service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] })))),
+      service.listSnapshotDates("pick_transactions", client).catch(() => []),
+      service.loadSnapshot("binloc", client, null).catch(() => ({ rows: [] })),
+    ]);
+
+    const matchingOrderLines = [];
+    const matchingOrderKeys  = new Set();
+    const matchingOrders     = new Set();
+    const matchingSkus       = new Set();
+    const matchingLocations  = new Set();
+    const matchingChannels   = new Set();
+    const matchingGroups     = new Set();
+    const matchingCustomers  = new Set();
+
+    for (let i = 0; i < loadedDates.length; i++) {
+      const snapshotDate = loadedDates[i];
+      const rows = orderLineResults[i]?.rows || [];
+      for (const row of rows) {
+        const orderChannel = String(row.order_channel || "").trim().toUpperCase();
+        if (channelFilter.size > 0 && !channelFilter.has(orderChannel)) continue;
+
+        const sku      = String(row.item || "").trim().toUpperCase();
+        const location = String(row.picking_location || "").trim().toUpperCase();
+        const matchesTarget = targetEntity === "location" ? location === targetValue : sku === targetValue;
+        if (!matchesTarget) continue;
+
+        const normalizedRow = {
+          ...row,
+          snapshot_date:     snapshotDate,
+          order_number:      String(row.order_number || "").trim(),
+          item:              sku,
+          picking_location:  location,
+          order_channel:     orderChannel,
+          item_group:        String(row.item_group || "").trim(),
+          customer_name:     String(row.customer_name || "").trim(),
+          pick_qty:          Number(row.pick_qty || row.qty_fulfilled || 0),
+        };
+
+        matchingOrderLines.push(normalizedRow);
+        matchingOrderKeys.add(buildOrderItemKey(normalizedRow.order_number, normalizedRow.item));
+        matchingOrders.add(normalizedRow.order_number);
+        if (normalizedRow.item) matchingSkus.add(normalizedRow.item);
+        if (normalizedRow.picking_location) matchingLocations.add(normalizedRow.picking_location);
+        if (normalizedRow.order_channel) matchingChannels.add(normalizedRow.order_channel);
+        if (normalizedRow.item_group) matchingGroups.add(normalizedRow.item_group);
+        if (normalizedRow.customer_name) matchingCustomers.add(normalizedRow.customer_name);
+      }
+    }
+
+    const pickTransactionDatesLoaded = loadedDates.filter(d => trxAvailableDates.includes(d));
+    const pickTransactionResults = await Promise.all(
+      pickTransactionDatesLoaded.map(d => service.loadSnapshot("pick_transactions", client, d).catch(() => ({ rows: [] })))
+    );
+
+    const matchingTransactions = [];
+    for (let i = 0; i < pickTransactionDatesLoaded.length; i++) {
+      const snapshotDate = pickTransactionDatesLoaded[i];
+      const rows = pickTransactionResults[i]?.rows || [];
+      for (const row of rows) {
+        const orderNumber = String(row.BTORDN || "").trim();
+        const sku         = String(row.BAITEM || "").trim().toUpperCase();
+        const location    = String(row.BABINL || "").trim().toUpperCase();
+        const orderItemKey = buildOrderItemKey(orderNumber, sku);
+
+        const matchesTarget = targetEntity === "location"
+          ? location === targetValue && matchingOrderKeys.has(orderItemKey)
+          : sku === targetValue && matchingOrders.has(orderNumber);
+
+        if (!matchesTarget) continue;
+
+        matchingTransactions.push({
+          ...row,
+          snapshot_date: snapshotDate,
+          BTORDN: orderNumber,
+          BAITEM: sku,
+          BABINL: location,
+          BTPICU: String(row.BTPICU || "").trim(),
+          BTPICD: String(row.BTPICD || "").trim(),
+          BAQTY:  Number(row.BAQTY || 0),
+        });
+      }
+    }
+
+    const exactLineTransactionMap = new Map();
+    const orderItemTransactionMap = new Map();
+    for (const row of matchingTransactions) {
+      const exactKey = buildOrderItemLocationKey(row.BTORDN, row.BAITEM, row.BABINL);
+      const fallbackKey = buildOrderItemKey(row.BTORDN, row.BAITEM);
+      const picker = String(row.BTPICU || "").trim() || "Unknown";
+      const qty = Number(row.BAQTY || 0);
+
+      for (const [targetMap, key] of [[exactLineTransactionMap, exactKey], [orderItemTransactionMap, fallbackKey]]) {
+        const entry = targetMap.get(key) || {
+          pickers: new Set(),
+          transaction_count: 0,
+          transaction_qty: 0,
+        };
+        entry.pickers.add(picker);
+        entry.transaction_count += 1;
+        entry.transaction_qty += qty;
+        targetMap.set(key, entry);
+      }
+    }
+
+    for (let i = 0; i < matchingOrderLines.length; i++) {
+      const row = matchingOrderLines[i];
+      const exactEntry = exactLineTransactionMap.get(
+        buildOrderItemLocationKey(row.order_number, row.item, row.picking_location)
+      );
+      const fallbackEntry = orderItemTransactionMap.get(buildOrderItemKey(row.order_number, row.item));
+      const selectedEntry = exactEntry || fallbackEntry || null;
+
+      matchingOrderLines[i] = {
+        ...row,
+        pickers: selectedEntry ? [...selectedEntry.pickers].sort((a, b) => a.localeCompare(b)).join(", ") : "",
+        transaction_count: (selectedEntry?.transaction_count ?? 0),
+        transaction_qty: (selectedEntry?.transaction_qty ?? 0),
+      };
+    }
+
+    const pickerMap = new Map();
+    for (const row of matchingTransactions) {
+      const picker = String(row.BTPICU || "").trim() || "Unknown";
+      const entry = pickerMap.get(picker) || {
+        picker,
+        transaction_count: 0,
+        pick_qty: 0,
+        orders: new Set(),
+        skus: new Set(),
+        locations: new Set(),
+      };
+      entry.transaction_count += 1;
+      entry.pick_qty += Number(row.BAQTY || 0);
+      if (row.BTORDN) entry.orders.add(row.BTORDN);
+      if (row.BAITEM) entry.skus.add(row.BAITEM);
+      if (row.BABINL) entry.locations.add(row.BABINL);
+      pickerMap.set(picker, entry);
+    }
+
+    const pickerBreakdown = [...pickerMap.values()]
+      .map(entry => ({
+        picker: entry.picker,
+        transaction_count: entry.transaction_count,
+        pick_qty: entry.pick_qty,
+        order_count: entry.orders.size,
+        sku_count: entry.skus.size,
+        location_count: entry.locations.size,
+      }))
+      .sort((a, b) => b.pick_qty - a.pick_qty || b.transaction_count - a.transaction_count || a.picker.localeCompare(b.picker));
+
+    const binlocRows = rawBinloc?.rows || [];
+    const locationBinlocRow = targetEntity === "location"
+      ? binlocRows.find(row => {
+          const rowLocation = getBinlocLocation(row);
+          const rowClient   = getBinlocRowClientCode(row);
+          return rowLocation === targetValue && (!rowClient || rowClient === normalizeClientCode(client));
+        }) || null
+      : null;
+
+    const locationBreakdownMap = new Map();
+    const skuBreakdownMap = new Map();
+    if (targetEntity === "sku") {
+      for (const row of matchingOrderLines) {
+        const loc = row.picking_location;
+        const entry = locationBreakdownMap.get(loc) || { location: loc, pick_qty: 0, line_count: 0, orders: new Set() };
+        entry.pick_qty += Number(row.pick_qty || 0);
+        entry.line_count += 1;
+        if (row.order_number) entry.orders.add(row.order_number);
+        locationBreakdownMap.set(loc, entry);
+      }
+    } else {
+      for (const row of matchingOrderLines) {
+        const sku = row.item;
+        const entry = skuBreakdownMap.get(sku) || {
+          sku,
+          item_group: row.item_group || "",
+          pick_qty: 0,
+          line_count: 0,
+          orders: new Set(),
+          customers: new Set(),
+        };
+        entry.pick_qty += Number(row.pick_qty || 0);
+        entry.line_count += 1;
+        if (row.order_number) entry.orders.add(row.order_number);
+        if (row.customer_name) entry.customers.add(row.customer_name);
+        skuBreakdownMap.set(sku, entry);
+      }
+    }
+
+    const locationBreakdown = [...locationBreakdownMap.values()]
+      .map(entry => ({
+        location: entry.location,
+        pick_qty: entry.pick_qty,
+        line_count: entry.line_count,
+        order_count: entry.orders.size,
+      }))
+      .sort((a, b) => b.pick_qty - a.pick_qty || b.line_count - a.line_count || a.location.localeCompare(b.location))
+      .slice(0, 25);
+
+    const skuBreakdown = [...skuBreakdownMap.values()]
+      .map(entry => ({
+        sku: entry.sku,
+        item_group: entry.item_group,
+        pick_qty: entry.pick_qty,
+        line_count: entry.line_count,
+        order_count: entry.orders.size,
+        customer_count: entry.customers.size,
+      }))
+      .sort((a, b) => b.pick_qty - a.pick_qty || b.line_count - a.line_count || a.sku.localeCompare(b.sku))
+      .slice(0, 25);
+
+    const totalPickQty = matchingOrderLines.reduce((sum, row) => sum + Number(row.pick_qty || 0), 0);
+    const transactionCount = matchingTransactions.length;
+
+    const summary = targetEntity === "location"
+      ? {
+          location: targetValue,
+          aisle_prefix: parseLocationCode(targetValue).aisle_prefix,
+          level: parseLocationCode(targetValue).level,
+          operating_area: String(locationBinlocRow?.BLWOPA || locationBinlocRow?.operating_area || "").trim().toUpperCase() || "—",
+          bin_size: String(locationBinlocRow?.BLSCOD || locationBinlocRow?.bin_size || "").trim().toUpperCase() || "—",
+          bin_type: normalizeBinType(locationBinlocRow?.BLBKPK || locationBinlocRow?.bin_type || ""),
+          max_bin_qty: Number(locationBinlocRow?.BLMAXQ || locationBinlocRow?.max_bin_qty || 0),
+          current_bin_qty: Number(locationBinlocRow?.BLQTY || locationBinlocRow?.qty || 0),
+          pick_qty: totalPickQty,
+          line_count: matchingOrderLines.length,
+          order_count: matchingOrders.size,
+          sku_count: matchingSkus.size,
+          picker_count: pickerBreakdown.length,
+          customer_count: matchingCustomers.size,
+          transaction_count: transactionCount,
+        }
+      : {
+          sku: targetValue,
+          pick_qty: totalPickQty,
+          line_count: matchingOrderLines.length,
+          order_count: matchingOrders.size,
+          location_count: matchingLocations.size,
+          picker_count: pickerBreakdown.length,
+          channel_count: matchingChannels.size,
+          item_group_count: matchingGroups.size,
+          customer_count: matchingCustomers.size,
+          transaction_count: transactionCount,
+        };
+
+    const skuDetail = targetEntity === "sku"
+      ? await service.getSkuDetail(targetValue, client).catch(() => null)
+      : null;
+
+    matchingOrderLines.sort((a, b) =>
+      String(b.snapshot_date || "").localeCompare(String(a.snapshot_date || "")) ||
+      String(a.order_number || "").localeCompare(String(b.order_number || "")) ||
+      Number(a.order_line || 0) - Number(b.order_line || 0)
+    );
+
+    matchingTransactions.sort((a, b) =>
+      String(b.snapshot_date || "").localeCompare(String(a.snapshot_date || "")) ||
+      String(b.BTPICD || "").localeCompare(String(a.BTPICD || "")) ||
+      String(a.BTORDN || "").localeCompare(String(b.BTORDN || ""))
+    );
+
+    return res.json({
+      ok: true,
+      entity: targetEntity,
+      value: targetValue,
+      meta: {
+        client_code: client,
+        available_dates: availableDates,
+        loaded_dates: loadedDates,
+        latest_date: latestDate,
+        date_count: loadedDates.length,
+        channel_filter: [...channelFilter],
+        pick_transaction_dates_available: trxAvailableDates,
+        pick_transaction_dates_loaded: pickTransactionDatesLoaded,
+        pick_transaction_dates_missing: loadedDates.filter(d => !pickTransactionDatesLoaded.includes(d)),
+      },
+      summary,
+      order_lines: matchingOrderLines,
+      pick_transactions: matchingTransactions,
+      picker_breakdown: pickerBreakdown,
+      sku_breakdown: skuBreakdown,
+      location_breakdown: locationBreakdown,
+      sku_detail: skuDetail,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
 // ── Reports page ──────────────────────────────────────────────────────────
 app.get("/reports", requireAdminPage, (req, res) => {
   const { clientChoices, selectedClient } = clientChoicesWithSelected(req);
@@ -609,16 +969,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
     const availableDates = await service.listSnapshotDates("order_lines", client);
     const latestDate     = availableDates[0] || null;
 
-    let loadedDates = [];
-    if (mode === "custom" && start && end) {
-      const s = start < end ? start : end;
-      const e = start < end ? end   : start;
-      loadedDates = availableDates.filter(d => d >= s && d <= e).slice(0, 90);
-    } else if (mode === "date" && date) {
-      loadedDates = availableDates.includes(date) ? [date] : [];
-    } else {
-      loadedDates = latestDate ? [latestDate] : [];
-    }
+    const loadedDates = resolveSnapshotWindowDates(availableDates, mode, date, start, end);
 
     if (!loadedDates.length) {
       return res.json({
