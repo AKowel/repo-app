@@ -88,6 +88,30 @@ function loadingHtml(label) {
   return `<div class="loading-row"><div class="spinner"></div> ${escHtml(label || "Loading...")}</div>`;
 }
 
+function localYMD(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function yesterdayInputYMD() {
+  const date = new Date();
+  date.setDate(date.getDate() - 1);
+  return localYMD(date);
+}
+
+function applyDateInputLimits() {
+  const maxDate = yesterdayInputYMD();
+  [inpDate(), inpStart(), inpEnd()].forEach((input) => {
+    if (!input) return;
+    input.max = maxDate;
+    if (input.value && input.value > maxDate) {
+      input.value = maxDate;
+    }
+  });
+}
+
 function eventElementTarget(event) {
   const target = event?.target || null;
   if (target && target.nodeType === 1) return target;
@@ -733,6 +757,7 @@ function switchTab(name) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  applyDateInputLimits();
   syncModeUi();
   initChannelPicker();
 

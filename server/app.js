@@ -4,6 +4,7 @@ const fs      = require("fs");
 const express = require("express");
 const session = require("express-session");
 const { config }          = require("./config");
+const { formatDateYMD }   = require("./helpers");
 const { SnapshotService } = require("./snapshotService");
 
 // ── Layout files (itemtracker data dir) ──────────────────────────────────────
@@ -127,16 +128,72 @@ function medianNumber(values) {
   return Math.round(((nums[mid - 1] + nums[mid]) / 2) * 100) / 100;
 }
 
+function yesterdayYMD() {
+  const date = new Date();
+  date.setDate(date.getDate() - 1);
+  return formatDateYMD(date);
+}
+
+function filterCompleteSnapshotDates(availableDates) {
+  const cutoff = yesterdayYMD();
+  return (availableDates || []).filter(date => String(date || "").trim() && String(date) <= cutoff);
+}
+
+function parseYMDDate(text) {
+  const value = String(text || "").trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const [, y, m, d] = match;
+  return new Date(Number(y), Number(m) - 1, Number(d));
+}
+
+function shiftYMD(text, { days = 0, months = 0 } = {}) {
+  const date = parseYMDDate(text);
+  if (!date) return "";
+
+  if (months) {
+    const targetDay = date.getDate();
+    date.setDate(1);
+    date.setMonth(date.getMonth() + months);
+    const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    date.setDate(Math.min(targetDay, monthEnd));
+  }
+
+  if (days) {
+    date.setDate(date.getDate() + days);
+  }
+
+  return formatDateYMD(date);
+}
+
 function resolveSnapshotWindowDates(availableDates, mode, date, start, end, maxDays = 90) {
-  const latestDate = availableDates[0] || null;
+  const completedDates = filterCompleteSnapshotDates(availableDates);
+  const latestDate = completedDates[0] || null;
+
   if (mode === "custom" && start && end) {
     const s = start < end ? start : end;
     const e = start < end ? end   : start;
-    return availableDates.filter(d => d >= s && d <= e).slice(0, maxDays);
+    return completedDates.filter(d => d >= s && d <= e).slice(0, maxDays);
   }
+
   if (mode === "date" && date) {
-    return availableDates.includes(date) ? [date] : [];
+    return completedDates.includes(date) ? [date] : [];
   }
+
+  const presetOffsets = {
+    last_week:      { days: -6 },
+    last_2_weeks:   { days: -13 },
+    last_month:     { months: -1, days: 1 },
+    last_3_months:  { months: -3, days: 1 },
+    last_6_months:  { months: -6, days: 1 },
+    last_12_months: { months: -12, days: 1 },
+  };
+
+  if (latestDate && Object.prototype.hasOwnProperty.call(presetOffsets, mode)) {
+    const startDate = shiftYMD(latestDate, presetOffsets[mode]);
+    return completedDates.filter(d => d >= startDate && d <= latestDate).slice(0, maxDays);
+  }
+
   return latestDate ? [latestDate] : [];
 }
 
@@ -327,7 +384,7 @@ app.get("/api/snapshot-dates", requireAdminApi, async (req, res) => {
     return res.status(400).json({ ok: false, error: "client and collection params required." });
   }
   try {
-    const dates = await service.listSnapshotDates(collection, client);
+    const dates = filterCompleteSnapshotDates(await service.listSnapshotDates(collection, client));
     return res.json({ ok: true, dates });
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err.message || err) });
@@ -354,9 +411,9 @@ app.get("/api/heatmap-data", requireAdminApi, async (req, res) => {
     const zoneIndex = buildZoneIndex(layout);
 
     // ── Snapshot dates ──────────────────────────────────────────────────────
-    const availableDates = await service.listSnapshotDates("pick_activity", client);
+    const availableDates = filterCompleteSnapshotDates(await service.listSnapshotDates("pick_activity", client));
     const latestDate     = availableDates[0] || null;
-    const selectedDate   = (mode === "date" && date) ? date : latestDate;
+    const selectedDate   = (mode === "date" && availableDates.includes(date)) ? date : latestDate;
 
     // ── Load snapshots in parallel ──────────────────────────────────────────
     const [pickResult, binlocResult] = await Promise.all([
@@ -577,7 +634,23 @@ app.get("/api/order-lines", requireAdminApi, async (req, res) => {
   const { client, date, customer, channel, item_group, q } = req.query;
   if (!client) return res.status(400).json({ ok: false, error: "client param required." });
   try {
-    const { rows: allRows, meta, fromCache } = await service.loadSnapshot("order_lines", client, date || null);
+    const availableDates = filterCompleteSnapshotDates(await service.listSnapshotDates("order_lines", client));
+    const selectedDate = availableDates.includes(String(date || "").trim())
+      ? String(date || "").trim()
+      : (availableDates[0] || null);
+
+    if (!selectedDate) {
+      return res.json({
+        ok: true,
+        rows: [],
+        meta: null,
+        fromCache: false,
+        totalRows: 0,
+        filterOptions: { channels: [], item_groups: [] },
+      });
+    }
+
+    const { rows: allRows, meta, fromCache } = await service.loadSnapshot("order_lines", client, selectedDate);
 
     let rows = allRows;
     if (q)          { const ql = q.toLowerCase();   rows = rows.filter(r => String(r.order_number || "").toLowerCase().includes(ql) || String(r.item || "").toLowerCase().includes(ql) || String(r.customer_name || "").toLowerCase().includes(ql)); }
@@ -602,7 +675,16 @@ app.get("/api/pick-transactions", requireAdminApi, async (req, res) => {
     return res.status(400).json({ ok: false, error: "client, order_number and item params required." });
   }
   try {
-    const { rows: allRows, meta, fromCache } = await service.loadSnapshot("pick_transactions", client, date || null);
+    const availableDates = filterCompleteSnapshotDates(await service.listSnapshotDates("pick_transactions", client));
+    const selectedDate = availableDates.includes(String(date || "").trim())
+      ? String(date || "").trim()
+      : (availableDates[0] || null);
+
+    if (!selectedDate) {
+      return res.json({ ok: true, rows: [], meta: null, fromCache: false });
+    }
+
+    const { rows: allRows, meta, fromCache } = await service.loadSnapshot("pick_transactions", client, selectedDate);
     const rows = allRows.filter(r =>
       String(r.BTORDN || "").trim() === String(order_number).trim() &&
       String(r.BAITEM || "").trim() === String(item).trim()
@@ -626,7 +708,7 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
   }
 
   try {
-    const availableDates = await service.listSnapshotDates("order_lines", client);
+    const availableDates = filterCompleteSnapshotDates(await service.listSnapshotDates("order_lines", client));
     const loadedDates    = resolveSnapshotWindowDates(availableDates, mode, date, start, end);
     const latestDate     = availableDates[0] || null;
 
@@ -664,7 +746,7 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
 
     const [orderLineResults, trxAvailableDates, rawBinloc] = await Promise.all([
       Promise.all(loadedDates.map(d => service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] })))),
-      service.listSnapshotDates("pick_transactions", client).catch(() => []),
+      service.listSnapshotDates("pick_transactions", client).then(filterCompleteSnapshotDates).catch(() => []),
       service.loadSnapshot("binloc", client, null).catch(() => ({ rows: [] })),
     ]);
 
@@ -968,7 +1050,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
 
   try {
     // ── Step 1: Resolve dates ─────────────────────────────────────────────
-    const availableDates = await service.listSnapshotDates("order_lines", client);
+    const availableDates = filterCompleteSnapshotDates(await service.listSnapshotDates("order_lines", client));
     const latestDate     = availableDates[0] || null;
 
     const loadedDates = resolveSnapshotWindowDates(availableDates, mode, date, start, end);
