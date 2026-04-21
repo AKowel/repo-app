@@ -1,0 +1,23 @@
+<div class="tbar">
+  <div class="tbar__bc">
+    <span>repo-app</span>
+    <span class="tbar__bc-sep">/</span>
+    <b><%= typeof pageLabel !== 'undefined' ? pageLabel : '' %></b>
+  </div>
+  <div class="tbar__r">
+    <span class="tbar-lbl">theme</span>
+    <div class="tdot" data-theme-target="carbon"   style="background:#4f8ef7" title="Carbon"></div>
+    <div class="tdot" data-theme-target="terminal" style="background:#34d058" title="Terminal"></div>
+    <div class="tdot" data-theme-target="ember"    style="background:#f0a030" title="Ember"></div>
+    <div class="tbar-sep"></div>
+    <div class="tdot" data-theme-target="light"    style="background:#2563eb" title="Light"></div>
+    <div class="tdot" data-theme-target="frost"    style="background:#6366f1" title="Frost"></div>
+    <div class="tdot" data-theme-target="warm"     style="background:#c2770a" title="Warm"></div>
+    <% if (typeof currentUser !== 'undefined' && currentUser) { %>
+    <div style="width:1px;height:14px;background:var(--sb-border);margin:0 4px;flex-shrink:0"></div>
+    <div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,0.06);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--accent)">
+      <%= (currentUser.name || currentUser.email || '?').charAt(0).toUpperCase() %>
+    </div>
+    <% } %>
+  </div>
+</div>

@@ -1,28 +1,26 @@
 (function () {
   "use strict";
 
-  // ── Theme switcher ────────────────────────────────────────────────────
-  var THEMES = ["light", "dark", "warm"];
+  var THEMES = ["carbon", "terminal", "ember", "light", "frost", "warm"];
+  var LEGACY_MAP = { dark: "carbon" }; // migrate old theme names
 
   function applyTheme(theme) {
-    if (!THEMES.includes(theme)) theme = "light";
+    if (LEGACY_MAP[theme]) theme = LEGACY_MAP[theme];
+    if (!THEMES.includes(theme)) theme = "carbon";
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("repo-theme", theme);
-    document.querySelectorAll("[data-theme-target]").forEach(function (btn) {
-      btn.classList.toggle("theme-btn--active", btn.dataset.themeTarget === theme);
+    document.querySelectorAll("[data-theme-target]").forEach(function (el) {
+      el.classList.toggle("tdot--on", el.dataset.themeTarget === theme);
+      el.classList.toggle("theme-btn--active", el.dataset.themeTarget === theme);
     });
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    // Wire theme buttons
-    document.querySelectorAll("[data-theme-target]").forEach(function (btn) {
-      btn.addEventListener("click", function () { applyTheme(btn.dataset.themeTarget); });
+    document.querySelectorAll("[data-theme-target]").forEach(function (el) {
+      el.addEventListener("click", function () { applyTheme(el.dataset.themeTarget); });
     });
-    // Sync active state on load
-    var saved = localStorage.getItem("repo-theme") || "light";
-    document.querySelectorAll("[data-theme-target]").forEach(function (btn) {
-      btn.classList.toggle("theme-btn--active", btn.dataset.themeTarget === saved);
-    });
+    var saved = localStorage.getItem("repo-theme") || "carbon";
+    applyTheme(saved);
   });
 
   // ── Toast system ──────────────────────────────────────────────────────
@@ -43,22 +41,17 @@
     var container = getContainer();
     var el = document.createElement("div");
     el.className = "toast toast--" + safeType;
-
     if (safeType === "success") {
       el.innerHTML =
-        '<span class="toast__tick">' +
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">' +
-        '<polyline points="20 6 9 17 4 12"></polyline></svg></span>' +
+        '<span class="toast__tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>' +
         '<span class="toast__message">' + escapeHtml(message) + "</span>";
     } else {
       el.innerHTML = '<span class="toast__message">' + escapeHtml(message) + "</span>";
     }
-
     container.appendChild(el);
     requestAnimationFrame(function () {
       requestAnimationFrame(function () { el.classList.add("toast--visible"); });
     });
-
     var timer = setTimeout(function () { dismissToast(el); }, 3500);
     el.addEventListener("click", function () { clearTimeout(timer); dismissToast(el); });
   }
