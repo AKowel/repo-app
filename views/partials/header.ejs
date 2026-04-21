@@ -1,72 +1,66 @@
-<header class="app-header">
+<aside class="sb">
   <!-- Brand -->
-  <a href="/" class="app-header__brand">
-    <div class="app-header__logo">
+  <div class="sb__brand">
+    <div class="sb__logo">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
       </svg>
     </div>
-    <span class="app-header__name"><%= appName %></span>
-  </a>
+    <div class="sb__name"><%= appName %><span>reporting center</span></div>
+  </div>
 
   <!-- Nav -->
-  <nav class="app-header__nav">
-    <a href="/heatmap"
-       class="app-header__nav-link<%= typeof activePage !== 'undefined' && activePage === 'heatmap' ? ' app-header__nav-link--active' : '' %>">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <nav class="sb__nav">
+    <div class="sb__sec">Views</div>
+
+    <a href="/heatmap" class="ni<%= typeof activePage !== 'undefined' && activePage === 'heatmap' ? ' ni--active' : '' %>">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
         <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
       </svg>
       Heatmap
     </a>
-    <a href="/order-lines"
-       class="app-header__nav-link<%= typeof activePage !== 'undefined' && activePage === 'order-lines' ? ' app-header__nav-link--active' : '' %>">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
-        <rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/>
+
+    <a href="/order-lines" class="ni<%= typeof activePage !== 'undefined' && activePage === 'order-lines' ? ' ni--active' : '' %>">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+        <line x1="8" y1="18" x2="21" y2="18"/>
+        <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
       </svg>
       Order Lines
     </a>
-    <a href="/reports"
-       class="app-header__nav-link<%= typeof activePage !== 'undefined' && activePage === 'reports' ? ' app-header__nav-link--active' : '' %>">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+
+    <a href="/reports" class="ni<%= typeof activePage !== 'undefined' && activePage === 'reports' ? ' ni--active' : '' %>">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
       </svg>
       Reports
     </a>
-    <a href="/admin"
-       class="app-header__nav-link<%= typeof activePage !== 'undefined' && activePage === 'admin' ? ' app-header__nav-link--active' : '' %>">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+
+    <a href="/admin" class="ni<%= typeof activePage !== 'undefined' && activePage === 'admin' ? ' ni--active' : '' %>">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/>
       </svg>
       Admin
     </a>
   </nav>
 
-  <!-- Actions -->
-  <div class="app-header__actions">
-    <!-- Theme switcher -->
-    <button class="theme-btn" data-theme-target="light"  title="Light theme"  aria-label="Light theme">☀️</button>
-    <button class="theme-btn" data-theme-target="dark"   title="Dark theme"   aria-label="Dark theme">🌙</button>
-    <button class="theme-btn" data-theme-target="warm"   title="Warm theme"   aria-label="Warm theme">🌿</button>
-
-    <div class="header-divider"></div>
-
+  <!-- User / sign out -->
+  <div class="sb__bot">
     <% if (currentUser) { %>
-      <div class="header-user">
-        <div class="header-user__avatar">
-          <%= (currentUser.name || currentUser.email || '?').charAt(0).toUpperCase() %>
+    <form method="POST" action="/logout" style="display:contents">
+      <button type="submit" class="user" title="Sign out">
+        <div class="uav"><%= (currentUser.name || currentUser.email || '?').charAt(0).toUpperCase() %></div>
+        <div style="flex:1;min-width:0">
+          <div class="un"><%= currentUser.name || currentUser.email %></div>
+          <div class="ue"><%= currentUser.email %></div>
         </div>
-        <span class="header-user__name"><%= currentUser.name || currentUser.email %></span>
-      </div>
-      <form method="POST" action="/logout" style="display:contents">
-        <button type="submit" class="header-signout">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-          </svg>
-          Sign out
-        </button>
-      </form>
+        <svg style="width:14px;height:14px;color:var(--sb-xs);flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+          <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+      </button>
+    </form>
     <% } %>
   </div>
-</header>
+</aside>

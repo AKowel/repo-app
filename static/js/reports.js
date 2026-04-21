@@ -1,6 +1,8 @@
 "use strict";
 
 let _data = null;
+const _locExpanded = { above20: true, below20: true };
+const _chLocExpanded = {}; // ch -> { above20: bool, below20: bool }
 
 const selClient = () => document.getElementById("rSelClient");
 const selMode = () => document.getElementById("rSelMode");
@@ -268,6 +270,7 @@ function renderAll(data) {
   renderReplenishment(data.replenishment);
   renderPcZone(data.pc_zone, meta);
   renderDaily(data.daily_breakdown);
+  renderChannelTabs(data.channel_details || {});
 }
 
 function renderOverview(summary, meta) {
@@ -303,9 +306,14 @@ function renderOverview(summary, meta) {
   el.innerHTML = html;
 }
 
+function hideGrp147() {
+  return document.getElementById("rHideGrp147")?.checked || false;
+}
+
 function renderTopSkus(topSkus, limit, highLevelSkus) {
   const el = document.getElementById("rTab-skus");
-  let html = `<div class="reports-section"><div class="reports-section__title">Top ${limit} SKUs</div></div>`;
+  if (hideGrp147()) topSkus = topSkus.filter(r => String(r.item_group) !== "147");
+  let html = `<div class="reports-section"><div class="reports-section__title">Top ${limit} SKUs${hideGrp147() ? ' <span style="font-size:10px;font-weight:400;color:var(--text-soft)">(group 147 hidden)</span>' : ''}</div></div>`;
 
   const cols = [
     { key: "_rank", label: "#", render: (_value, row) => topSkus.indexOf(row) + 1 },
@@ -331,10 +339,25 @@ function renderTopSkus(topSkus, limit, highLevelSkus) {
   el.innerHTML = html;
 }
 
+function toggleLocSection(which) {
+  _locExpanded[which] = !_locExpanded[which];
+  const sectionEl = document.getElementById(which === "above20" ? "rLocSectionAbove20" : "rLocSectionBelow20");
+  const arrowEl = document.getElementById(which === "above20" ? "rLocArrowAbove" : "rLocArrowBelow");
+  if (sectionEl) sectionEl.style.display = _locExpanded[which] ? "" : "none";
+  if (arrowEl) arrowEl.style.transform = _locExpanded[which] ? "" : "rotate(-90deg)";
+}
+
 function renderLocations(topLocations) {
   const el = document.getElementById("rTab-locations");
-  let html = '<div class="reports-section"><div class="reports-section__title">Top 100 Locations</div></div>';
-  html += tableHtml([
+  if (hideGrp147()) topLocations = topLocations.filter(r => String(r.primary_item_group) !== "147");
+
+  const above20 = topLocations.filter(r => Number(r.level) >= 20);
+  const below20 = topLocations.filter(r => Number(r.level) < 20);
+
+  const headerNote = hideGrp147() ? ' <span style="font-size:10px;font-weight:400;color:var(--text-soft)">(group 147 hidden)</span>' : "";
+  const chevron = `<svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="flex-shrink:0;transition:transform 0.15s"><polyline points="1,3 5,7 9,3"/></svg>`;
+
+  const locCols = [
     { key: "location", label: "Location", render: (value) => renderDetailLink("location", value, value) },
     { key: "aisle_prefix", label: "Aisle" },
     { key: "level", label: "Level" },
@@ -345,7 +368,36 @@ function renderLocations(topLocations) {
     { key: "pick_qty", label: "Pick Qty", render: (value) => fmt(value) },
     { key: "line_count", label: "Lines", render: (value) => fmt(value) },
     { key: "sku_count", label: "SKUs", render: (value) => fmt(value) },
-  ], topLocations, "No locations found.");
+  ];
+
+  const aboveArrow = `<span id="rLocArrowAbove" style="display:inline-flex;transition:transform 0.15s;${_locExpanded.above20 ? "" : "transform:rotate(-90deg)"}">${chevron}</span>`;
+  const belowArrow = `<span id="rLocArrowBelow" style="display:inline-flex;transition:transform 0.15s;${_locExpanded.below20 ? "" : "transform:rotate(-90deg)"}">${chevron}</span>`;
+
+  let html = `<div class="reports-section"><div class="reports-section__title">Top 100 Locations${headerNote}</div></div>`;
+
+  html += `
+    <div class="reports-section" style="cursor:pointer;user-select:none" onclick="toggleLocSection('above20')">
+      <div class="reports-section__title" style="display:flex;align-items:center;gap:6px">
+        ${aboveArrow}
+        Above Level 20
+        <span style="font-size:10px;font-weight:400;color:var(--text-soft)">(${above20.length} locations)</span>
+      </div>
+    </div>
+    <div id="rLocSectionAbove20" style="${_locExpanded.above20 ? "" : "display:none"}">
+      ${tableHtml(locCols, above20, "No locations at or above level 20.")}
+    </div>
+    <div class="reports-section" style="cursor:pointer;user-select:none" onclick="toggleLocSection('below20')">
+      <div class="reports-section__title" style="display:flex;align-items:center;gap:6px">
+        ${belowArrow}
+        Below Level 20
+        <span style="font-size:10px;font-weight:400;color:var(--text-soft)">(${below20.length} locations)</span>
+      </div>
+    </div>
+    <div id="rLocSectionBelow20" style="${_locExpanded.below20 ? "" : "display:none"}">
+      ${tableHtml(locCols, below20, "No locations below level 20.")}
+    </div>
+  `;
+
   el.innerHTML = html;
 }
 
@@ -747,6 +799,515 @@ function renderDetailDrawer(data) {
   detailDrawerBody().innerHTML = html || emptyStateHtml("No detail was returned for this selection.");
 }
 
+function toggleChLocSection(ch, which) {
+  if (!_chLocExpanded[ch]) _chLocExpanded[ch] = { above20: true, below20: true };
+  _chLocExpanded[ch][which] = !_chLocExpanded[ch][which];
+  const sEl = document.getElementById(`rChLoc-${ch}-${which}`);
+  const aEl = document.getElementById(`rChArrow-${ch}-${which}`);
+  const open = _chLocExpanded[ch][which];
+  if (sEl) sEl.style.display = open ? "" : "none";
+  if (aEl) aEl.style.transform = open ? "" : "rotate(-90deg)";
+}
+
+function renderChannelDetail(ch, data, el) {
+  if (!_chLocExpanded[ch]) _chLocExpanded[ch] = { above20: true, below20: true };
+
+  let topSkus = data.top_skus || [];
+  let topLocations = data.top_locations || [];
+  if (hideGrp147()) {
+    topSkus = topSkus.filter(r => String(r.item_group) !== "147");
+    topLocations = topLocations.filter(r => String(r.primary_item_group) !== "147");
+  }
+
+  const above20 = topLocations.filter(r => Number(r.level) >= 20);
+  const below20 = topLocations.filter(r => Number(r.level) < 20);
+  const chevron = `<svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="flex-shrink:0;transition:transform 0.15s"><polyline points="1,3 5,7 9,3"/></svg>`;
+
+  const skuCols = [
+    { key: "_rank", label: "#", render: (_v, row) => topSkus.indexOf(row) + 1 },
+    { key: "sku", label: "SKU", render: (v) => renderDetailLink("sku", v, v) },
+    { key: "item_group", label: "Group" },
+    { key: "pick_qty", label: "Pick Qty", render: (v) => fmt(v) },
+    { key: "line_count", label: "Lines", render: (v) => fmt(v) },
+    { key: "order_count", label: "Orders", render: (v) => fmt(v) },
+    { key: "location_count", label: "Locations", render: (v) => fmt(v) },
+    { key: "share_of_picks", label: "Channel Share", render: (v) => renderShareBar(v) },
+  ];
+  const locCols = [
+    { key: "location", label: "Location", render: (v) => renderDetailLink("location", v, v) },
+    { key: "aisle_prefix", label: "Aisle" },
+    { key: "level", label: "Level" },
+    { key: "operating_area", label: "Area" },
+    { key: "bin_size", label: "Bin Size" },
+    { key: "bin_type", label: "Bin Type" },
+    { key: "max_bin_qty", label: "Max Qty", render: (v) => v ? fmt(v) : "-" },
+    { key: "pick_qty", label: "Pick Qty", render: (v) => fmt(v) },
+    { key: "line_count", label: "Lines", render: (v) => fmt(v) },
+    { key: "sku_count", label: "SKUs", render: (v) => fmt(v) },
+  ];
+
+  const grpNote = hideGrp147() ? ' <span style="font-size:10px;font-weight:400;color:var(--text-soft)">(group 147 hidden)</span>' : "";
+  const aboveOpen = _chLocExpanded[ch].above20;
+  const belowOpen = _chLocExpanded[ch].below20;
+  const aboveArrow = `<span id="rChArrow-${ch}-above20" style="display:inline-flex;transition:transform 0.15s;${aboveOpen ? "" : "transform:rotate(-90deg)"}">${chevron}</span>`;
+  const belowArrow = `<span id="rChArrow-${ch}-below20" style="display:inline-flex;transition:transform 0.15s;${belowOpen ? "" : "transform:rotate(-90deg)"}">${chevron}</span>`;
+
+  let html = `<div class="reports-section"><div class="reports-section__title">Top SKUs — ${escHtml(data.label || ch)}${grpNote}</div></div>`;
+  html += tableHtml(skuCols, topSkus, "No SKU data for this channel.");
+
+  html += `<div class="reports-section"><div class="reports-section__title">Top Locations — ${escHtml(data.label || ch)}${grpNote}</div></div>`;
+  html += `
+    <div class="reports-section" style="cursor:pointer;user-select:none" onclick="toggleChLocSection('${escAttr(ch)}','above20')">
+      <div class="reports-section__title" style="display:flex;align-items:center;gap:6px">
+        ${aboveArrow} Above Level 20
+        <span style="font-size:10px;font-weight:400;color:var(--text-soft)">(${above20.length} locations)</span>
+      </div>
+    </div>
+    <div id="rChLoc-${escAttr(ch)}-above20" style="${aboveOpen ? "" : "display:none"}">
+      ${tableHtml(locCols, above20, "No locations at or above level 20 for this channel.")}
+    </div>
+    <div class="reports-section" style="cursor:pointer;user-select:none" onclick="toggleChLocSection('${escAttr(ch)}','below20')">
+      <div class="reports-section__title" style="display:flex;align-items:center;gap:6px">
+        ${belowArrow} Below Level 20
+        <span style="font-size:10px;font-weight:400;color:var(--text-soft)">(${below20.length} locations)</span>
+      </div>
+    </div>
+    <div id="rChLoc-${escAttr(ch)}-below20" style="${belowOpen ? "" : "display:none"}">
+      ${tableHtml(locCols, below20, "No locations below level 20 for this channel.")}
+    </div>
+  `;
+
+  el.innerHTML = html;
+}
+
+function renderChannelTabs(channelDetails) {
+  const tabBar = document.getElementById("rTabs");
+  const contentWrap = tabBar.closest(".card-edge").querySelector("div[style*='overflow-y']");
+
+  // Remove previously injected channel tabs/panels
+  tabBar.querySelectorAll("[data-channel-tab]").forEach(el => el.remove());
+  if (contentWrap) contentWrap.querySelectorAll("[data-channel-panel]").forEach(el => el.remove());
+
+  // Sort channels by total pick_qty from channel_breakdown
+  const order = (_data?.channel_breakdown || []).map(r => r.channel);
+  const sorted = Object.entries(channelDetails).sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
+
+  for (const [ch, data] of sorted) {
+    const tabName = `ch-${ch}`;
+
+    const btn = document.createElement("button");
+    btn.className = "tabbtn reports-tab-btn";
+    btn.dataset.tab = tabName;
+    btn.dataset.channelTab = ch;
+    btn.textContent = data.label || ch;
+    tabBar.appendChild(btn);
+
+    const panel = document.createElement("div");
+    panel.id = `rTab-${tabName}`;
+    panel.className = "reports-tab-content";
+    panel.dataset.channelPanel = ch;
+    if (contentWrap) contentWrap.appendChild(panel);
+
+    renderChannelDetail(ch, data, panel);
+  }
+}
+
+function showExportModal() {
+  if (!_data) { alert("No data loaded yet — click Reload first."); return; }
+  const channels = _data.channel_breakdown || [];
+  const body = document.getElementById("rExportModalBody");
+  body.innerHTML = `
+    <p style="margin:0 0 12px;font-size:12px;color:var(--text-soft)">
+      General sheets (Summary, SKUs, Locations, Aisles, Structure, Channels, Replenishment, Daily) are always included.
+      Select which channel detail sheets to add:
+    </p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${channels.length === 0 ? '<p style="color:var(--text-soft);font-size:12px">No channels in current data.</p>' :
+        channels.map(r => `
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+            <input type="checkbox" class="rExportChCb" value="${escAttr(r.channel)}"
+              style="accent-color:var(--accent);width:13px;height:13px;cursor:pointer" checked />
+            <span><strong>${escHtml(r.channel)}</strong> — ${escHtml(r.label || r.channel)}</span>
+            <span style="color:var(--text-soft);margin-left:auto">${fmt(r.pick_qty)} picks</span>
+          </label>`).join("")
+      }
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
+      <button class="btn btn--sm" id="rExportChkAll" type="button">All</button>
+      <button class="btn btn--sm" id="rExportChkNone" type="button">None</button>
+    </div>
+  `;
+  document.getElementById("rExportModalBackdrop").hidden = false;
+
+  document.getElementById("rExportChkAll")?.addEventListener("click", () => {
+    document.querySelectorAll(".rExportChCb").forEach(cb => { cb.checked = true; });
+  });
+  document.getElementById("rExportChkNone")?.addEventListener("click", () => {
+    document.querySelectorAll(".rExportChCb").forEach(cb => { cb.checked = false; });
+  });
+}
+
+function closeExportModal() {
+  document.getElementById("rExportModalBackdrop").hidden = true;
+}
+
+function exportToExcel(selectedChannels) {
+  if (!_data) { alert("No data loaded yet — click Reload first."); return; }
+  if (typeof XLSX === "undefined") { alert("Excel library not loaded. Check your connection and reload."); return; }
+
+  const wb = XLSX.utils.book_new();
+  const { meta, summary } = _data;
+  const sortedDates = [...(meta.loaded_dates || [])].sort();
+  const dateStr = sortedDates.length === 1 ? sortedDates[0]
+    : sortedDates.length > 1 ? `${sortedDates[0]} to ${sortedDates[sortedDates.length - 1]}` : "No data";
+
+  const channelLabel = getSelectedChannels().length ? getSelectedChannels().join(", ") : "All channels";
+  const rankLabel = selRankBy()?.options[selRankBy().selectedIndex]?.text || "";
+  const grp147Label = hideGrp147() ? "Hidden (group 147 excluded)" : "Shown (all groups included)";
+  const generatedAt = new Date().toLocaleString();
+
+  // Builds a context block + description rows followed by the column header + data rows
+  function makeSheet(title, description, cols, rows) {
+    const dataRows = (rows || []).map(row => cols.map(c => {
+      const v = row[c.key];
+      return (v === null || v === undefined) ? "" : v;
+    }));
+    const aoa = [
+      [title],
+      [],
+      ["REPORT CONTEXT"],
+      ["Client", meta.client_code || ""],
+      ["Date Range", dateStr],
+      ["Days Included", meta.date_count],
+      ["Channels", channelLabel],
+      ["Rank By", rankLabel],
+      ["Group 147 Filter", grp147Label],
+      ["Exported At", generatedAt],
+      [],
+      ["ABOUT THIS DATA"],
+      [description],
+      [],
+      cols.map(c => c.label),
+      ...dataRows,
+    ];
+    return XLSX.utils.aoa_to_sheet(aoa);
+  }
+
+  // Summary — built manually (key/value layout, not a column table)
+  const summarySheet = XLSX.utils.aoa_to_sheet([
+    ["Summary — Pick Analysis"],
+    [],
+    ["REPORT CONTEXT"],
+    ["Client", meta.client_code || ""],
+    ["Date Range", dateStr],
+    ["Days Included", meta.date_count],
+    ["Channels", channelLabel],
+    ["Rank By", rankLabel],
+    ["Group 147 Filter", grp147Label],
+    ["Exported At", generatedAt],
+    [],
+    ["ABOUT THIS DATA"],
+    ["Top-level pick activity metrics for the selected client and date window. Pick Qty is the total number of units picked. " +
+     "Lines is the number of individual order lines fulfilled. Orders is the count of distinct order numbers processed. " +
+     "High-Level picks are those taken from storage locations at level 20 or above (upper-rack picking). " +
+     "High-Level Share is high-level pick qty as a percentage of all pick qty. " +
+     "Peak Day is the single calendar date with the highest pick qty within the window."],
+    [],
+    ["Metric", "Value"],
+    ["Total Pick Qty", summary.total_pick_qty],
+    ["Total Lines", summary.total_line_count],
+    ["Total Orders", summary.total_order_count],
+    ["Avg Qty per Line", summary.avg_qty_per_line],
+    ["Avg Lines per Day", summary.avg_lines_per_day],
+    ["Active SKUs", summary.active_sku_count],
+    ["Active Locations", summary.active_location_count],
+    ["Active Aisles", summary.active_aisle_count],
+    ["Active Channels", summary.active_channel_count],
+    ["Active Item Groups", summary.active_item_group_count],
+    ["High-Level Pick Qty (level ≥ 20)", summary.high_level_pick_qty],
+    ["High-Level Share %", summary.high_level_share],
+    ["Peak Day", summary.peak_day_date || ""],
+    ["Peak Day Pick Qty", summary.peak_day_pick_qty],
+  ]);
+  XLSX.utils.book_append_sheet(wb, summarySheet, "Summary");
+
+  // Top SKUs
+  let topSkus = _data.top_skus || [];
+  if (hideGrp147()) topSkus = topSkus.filter(r => String(r.item_group) !== "147");
+  XLSX.utils.book_append_sheet(wb, makeSheet(
+    "Top SKUs — Pick Analysis",
+    `The top ${meta.limit || topSkus.length} SKUs ranked by ${rankLabel} across all order lines within the selected date window. ` +
+    "Pick Qty is the total units picked for each SKU. Lines is the number of order lines containing that SKU. " +
+    "Orders is the count of distinct orders that included the SKU. Locations is how many different storage locations the SKU was picked from. " +
+    "Share % is this SKU's pick qty as a percentage of the total pick qty across all SKUs in the window.",
+    [
+      { key: "sku", label: "SKU" },
+      { key: "item_group", label: "Item Group" },
+      { key: "pick_qty", label: "Pick Qty" },
+      { key: "line_count", label: "Lines" },
+      { key: "order_count", label: "Orders" },
+      { key: "location_count", label: "Locations" },
+      { key: "share_of_picks", label: "Share %" },
+    ],
+    topSkus
+  ), "Top SKUs");
+
+  // High-Level SKUs
+  if ((_data.high_level_skus || []).length) {
+    XLSX.utils.book_append_sheet(wb, makeSheet(
+      "High-Level SKUs — Pick Analysis",
+      "SKUs that had at least one pick from a location at level 20 or above (upper-rack / elevated picking). " +
+      "High-Level Qty is the number of units picked specifically from those elevated locations. " +
+      "Total Qty is the SKU's overall pick qty across all levels. " +
+      "HL Share % is high-level qty as a percentage of that SKU's total pick qty — a high value means most picks for that SKU come from upper racking.",
+      [
+        { key: "sku", label: "SKU" },
+        { key: "high_level_pick_qty", label: "High-Level Qty" },
+        { key: "total_pick_qty", label: "Total Qty" },
+        { key: "high_level_share", label: "HL Share %" },
+      ],
+      _data.high_level_skus
+    ), "High-Level SKUs");
+  }
+
+  // Locations split
+  let topLocations = _data.top_locations || [];
+  if (hideGrp147()) topLocations = topLocations.filter(r => String(r.primary_item_group) !== "147");
+  const locCols = [
+    { key: "location", label: "Location" },
+    { key: "aisle_prefix", label: "Aisle" },
+    { key: "level", label: "Level" },
+    { key: "operating_area", label: "Area" },
+    { key: "bin_size", label: "Bin Size" },
+    { key: "bin_type", label: "Bin Type" },
+    { key: "max_bin_qty", label: "Max Qty" },
+    { key: "pick_qty", label: "Pick Qty" },
+    { key: "line_count", label: "Lines" },
+    { key: "sku_count", label: "SKUs" },
+  ];
+  const locDesc = "The top 100 storage locations ranked by pick activity within the selected window. " +
+    "Level is the physical height tier of the location (level 1 = ground; higher numbers = upper racking). " +
+    "Area is the operating zone the location belongs to. Bin Size and Bin Type describe the physical slot. " +
+    "Max Qty is the maximum units the bin can hold as configured in the warehouse system. " +
+    "Pick Qty is total units picked from the location. Lines is order lines fulfilled from it. SKUs is the count of distinct products picked from it. " +
+    "Primary Item Group is the item group that contributed the most pick qty to this location during the window.";
+  XLSX.utils.book_append_sheet(wb, makeSheet(
+    "Locations Above Level 20 — Pick Analysis",
+    "Filtered to locations at level 20 or above (elevated / upper-rack storage). " + locDesc,
+    locCols,
+    topLocations.filter(r => Number(r.level) >= 20)
+  ), "Locations Above 20");
+  XLSX.utils.book_append_sheet(wb, makeSheet(
+    "Locations Below Level 20 — Pick Analysis",
+    "Filtered to locations below level 20 (ground-level and low-rack storage). " + locDesc,
+    locCols,
+    topLocations.filter(r => Number(r.level) < 20)
+  ), "Locations Below 20");
+
+  // Aisles
+  XLSX.utils.book_append_sheet(wb, makeSheet(
+    "Top Aisles — Pick Analysis",
+    "Pick activity aggregated by aisle prefix (the letter/number group that identifies a warehouse aisle). " +
+    "Top 50 aisles are shown, ranked by pick qty. Locations is the count of distinct storage locations in that aisle that were picked from. " +
+    "SKUs is the count of distinct products picked from the aisle. Share % is the aisle's pick qty as a percentage of total pick qty.",
+    [
+      { key: "aisle_prefix", label: "Aisle" },
+      { key: "pick_qty", label: "Pick Qty" },
+      { key: "line_count", label: "Lines" },
+      { key: "location_count", label: "Locations" },
+      { key: "sku_count", label: "SKUs" },
+      { key: "share_of_picks", label: "Share %" },
+    ],
+    _data.top_aisles || []
+  ), "Aisles");
+
+  // Level Breakdown
+  XLSX.utils.book_append_sheet(wb, makeSheet(
+    "Level Breakdown — Pick Analysis",
+    "Pick activity grouped by storage level number. Level 1 is ground floor; higher numbers are upper racking tiers. " +
+    "High-Level flags levels at or above 20 as elevated picking (requiring ladders or high-reach equipment). " +
+    "This breakdown shows how pick volume is distributed vertically across the warehouse.",
+    [
+      { key: "level", label: "Level" },
+      { key: "is_high_level", label: "High-Level (≥20)" },
+      { key: "pick_qty", label: "Pick Qty" },
+      { key: "line_count", label: "Lines" },
+      { key: "location_count", label: "Locations" },
+      { key: "sku_count", label: "SKUs" },
+      { key: "share_of_picks", label: "Share %" },
+    ],
+    _data.level_breakdown || []
+  ), "Level Breakdown");
+
+  // Bin Size
+  XLSX.utils.book_append_sheet(wb, makeSheet(
+    "Bin Size Breakdown — Pick Analysis",
+    "Pick activity grouped by bin size category as configured in the warehouse bin-location (BINLOC) data. " +
+    "Bin size typically reflects the physical footprint or capacity class of the storage slot (e.g. S, M, L, XL). " +
+    "Share % is that bin size's contribution to total pick qty.",
+    [
+      { key: "bin_size", label: "Bin Size" },
+      { key: "pick_qty", label: "Pick Qty" },
+      { key: "line_count", label: "Lines" },
+      { key: "location_count", label: "Locations" },
+      { key: "share_of_picks", label: "Share %" },
+    ],
+    _data.bin_size_breakdown || []
+  ), "Bin Size");
+
+  // Bin Type
+  XLSX.utils.book_append_sheet(wb, makeSheet(
+    "Bin Type Breakdown — Pick Analysis",
+    "Pick activity grouped by bin type as configured in the warehouse bin-location (BINLOC) data. " +
+    "Bin type describes the storage method or slot format (e.g. shelf, pallet, flow-rack, carton). " +
+    "Share % is that bin type's contribution to total pick qty.",
+    [
+      { key: "bin_type", label: "Bin Type" },
+      { key: "pick_qty", label: "Pick Qty" },
+      { key: "line_count", label: "Lines" },
+      { key: "location_count", label: "Locations" },
+      { key: "share_of_picks", label: "Share %" },
+    ],
+    _data.bin_type_breakdown || []
+  ), "Bin Type");
+
+  // Operating Area
+  XLSX.utils.book_append_sheet(wb, makeSheet(
+    "Operating Area Breakdown — Pick Analysis",
+    "Pick activity grouped by operating area — the functional zone of the warehouse each location belongs to (e.g. PC, ambient, chilled, bulk). " +
+    "Areas are sourced from the BINLOC snapshot. If BINLOC data is unavailable, area values will be blank.",
+    [
+      { key: "operating_area", label: "Area" },
+      { key: "pick_qty", label: "Pick Qty" },
+      { key: "line_count", label: "Lines" },
+      { key: "location_count", label: "Locations" },
+      { key: "sku_count", label: "SKUs" },
+      { key: "share_of_picks", label: "Share %" },
+    ],
+    _data.operating_area_breakdown || []
+  ), "Operating Areas");
+
+  // Item Groups
+  XLSX.utils.book_append_sheet(wb, makeSheet(
+    "Item Group Breakdown — Pick Analysis",
+    "Pick activity grouped by item group code — a product classification used in the warehouse management system (WMS). " +
+    "Item groups typically represent product categories or departments (e.g. 100 = ambient grocery, 147 = special handling). " +
+    "SKUs is the count of distinct products in that group that were picked during the window.",
+    [
+      { key: "item_group", label: "Item Group" },
+      { key: "pick_qty", label: "Pick Qty" },
+      { key: "line_count", label: "Lines" },
+      { key: "order_count", label: "Orders" },
+      { key: "sku_count", label: "SKUs" },
+      { key: "share_of_picks", label: "Share %" },
+    ],
+    _data.item_group_breakdown || []
+  ), "Item Groups");
+
+  // Channels
+  XLSX.utils.book_append_sheet(wb, makeSheet(
+    "Channel Breakdown — Pick Analysis",
+    "Pick activity broken down by order channel — the fulfilment route or customer type each order was placed through " +
+    "(e.g. B = Build Your Own, C = Customer Web, S = Store Replen, W = Wholesale). " +
+    "A single order can only belong to one channel. Share % is that channel's pick qty as a percentage of total pick qty.",
+    [
+      { key: "channel", label: "Channel Code" },
+      { key: "label", label: "Channel Name" },
+      { key: "pick_qty", label: "Pick Qty" },
+      { key: "line_count", label: "Lines" },
+      { key: "order_count", label: "Orders" },
+      { key: "sku_count", label: "SKUs" },
+      { key: "share_of_picks", label: "Share %" },
+    ],
+    _data.channel_breakdown || []
+  ), "Channels");
+
+  // Replenishment
+  XLSX.utils.book_append_sheet(wb, makeSheet(
+    "Replenishment Estimates — Pick Analysis",
+    "Estimated replenishment counts for low-level locations (level < 20) based on pick demand vs bin capacity. " +
+    "Est. Replens is calculated as: Pick Qty ÷ Max Bin Qty, rounded up — representing how many times the bin would need to be refilled " +
+    "to satisfy demand during the window. This is an estimate only; actual replenishment frequency depends on stock levels and replenishment rules. " +
+    "Requires BINLOC snapshot data to populate Max Bin Qty.",
+    [
+      { key: "location", label: "Location" },
+      { key: "aisle_prefix", label: "Aisle" },
+      { key: "level", label: "Level" },
+      { key: "operating_area", label: "Area" },
+      { key: "bin_size", label: "Bin Size" },
+      { key: "bin_type", label: "Bin Type" },
+      { key: "pick_qty", label: "Pick Qty" },
+      { key: "max_bin_qty", label: "Max Bin Qty" },
+      { key: "estimated_replenishments", label: "Est. Replens" },
+    ],
+    _data.replenishment?.locations || []
+  ), "Replenishment");
+
+  // Daily
+  XLSX.utils.book_append_sheet(wb, makeSheet(
+    "Daily Breakdown — Pick Analysis",
+    "Pick activity broken down day by day across the selected date window. Each row is a single calendar date. " +
+    "Pick Qty is total units picked on that day. Lines is order lines fulfilled. Orders is distinct order numbers processed. " +
+    "SKUs is the count of distinct products picked. Days with no pick snapshot data are excluded from this table.",
+    [
+      { key: "date", label: "Date" },
+      { key: "pick_qty", label: "Pick Qty" },
+      { key: "line_count", label: "Lines" },
+      { key: "order_count", label: "Orders" },
+      { key: "sku_count", label: "SKUs" },
+    ],
+    _data.daily_breakdown || []
+  ), "Daily");
+
+  // Per-channel detail sheets (selected via modal)
+  const channelDetails = _data.channel_details || {};
+  const channelsToExport = selectedChannels || Object.keys(channelDetails);
+  for (const ch of channelsToExport) {
+    const det = channelDetails[ch];
+    if (!det) continue;
+    let chSkus = det.top_skus || [];
+    let chLocs = det.top_locations || [];
+    if (hideGrp147()) {
+      chSkus = chSkus.filter(r => String(r.item_group) !== "147");
+      chLocs = chLocs.filter(r => String(r.primary_item_group) !== "147");
+    }
+    const chLabel = det.label || ch;
+    const sheetPrefix = `${ch} -`;
+    XLSX.utils.book_append_sheet(wb, makeSheet(
+      `Channel ${ch} (${chLabel}) — Top SKUs`,
+      `Top SKUs picked for the ${chLabel} (${ch}) channel within the selected date window. ` +
+      "Share % is this SKU's pick qty as a percentage of all picks within this channel.",
+      [
+        { key: "sku", label: "SKU" },
+        { key: "item_group", label: "Item Group" },
+        { key: "pick_qty", label: "Pick Qty" },
+        { key: "line_count", label: "Lines" },
+        { key: "order_count", label: "Orders" },
+        { key: "location_count", label: "Locations" },
+        { key: "share_of_picks", label: "Channel Share %" },
+      ],
+      chSkus
+    ), `${sheetPrefix} Top SKUs`);
+    XLSX.utils.book_append_sheet(wb, makeSheet(
+      `Channel ${ch} (${chLabel}) — Locations Above 20`,
+      `Top 100 locations at level 20 or above used to fulfil ${chLabel} (${ch}) channel orders. ` +
+      "Pick Qty and Lines relate only to picks for this channel.",
+      locCols,
+      chLocs.filter(r => Number(r.level) >= 20)
+    ), `${sheetPrefix} Locs ≥20`);
+    XLSX.utils.book_append_sheet(wb, makeSheet(
+      `Channel ${ch} (${chLabel}) — Locations Below 20`,
+      `Top 100 locations below level 20 used to fulfil ${chLabel} (${ch}) channel orders. ` +
+      "Pick Qty and Lines relate only to picks for this channel.",
+      locCols,
+      chLocs.filter(r => Number(r.level) < 20)
+    ), `${sheetPrefix} Locs <20`);
+  }
+
+  const filename = `pick-analysis_${meta.client_code || "report"}_${sortedDates[0] || "export"}.xlsx`;
+  XLSX.writeFile(wb, filename);
+}
+
 function switchTab(name) {
   document.querySelectorAll(".reports-tab-btn").forEach((btn) => {
     btn.classList.toggle("reports-tab-btn--active", btn.dataset.tab === name);
@@ -767,6 +1328,21 @@ document.addEventListener("DOMContentLoaded", () => {
     loadReports();
   });
   document.getElementById("rBtnLoad").addEventListener("click", loadReports);
+  document.getElementById("rBtnExport")?.addEventListener("click", showExportModal);
+  document.getElementById("rExportModalClose")?.addEventListener("click", closeExportModal);
+  document.getElementById("rExportModalCancel")?.addEventListener("click", closeExportModal);
+  document.getElementById("rExportModalBackdrop")?.addEventListener("click", closeExportModal);
+  document.getElementById("rExportModalConfirm")?.addEventListener("click", () => {
+    const selected = [...document.querySelectorAll(".rExportChCb:checked")].map(cb => cb.value);
+    closeExportModal();
+    exportToExcel(selected);
+  });
+  document.getElementById("rHideGrp147")?.addEventListener("change", () => {
+    if (_data) {
+      renderTopSkus(_data.top_skus, _data.meta.limit, _data.high_level_skus);
+      renderLocations(_data.top_locations);
+    }
+  });
   document.getElementById("rTabs").addEventListener("click", (e) => {
     const btn = closestFromEvent(e, ".reports-tab-btn");
     if (btn) switchTab(btn.dataset.tab);

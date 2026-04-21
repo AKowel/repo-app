@@ -1,56 +1,78 @@
 <%- include('partials/head', { pageTitle: 'Sign In' }) %>
 
-<div class="login-shell">
-  <div class="login-box">
-    <!-- Brand -->
-    <div class="login-brand">
-      <div class="login-brand__logo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
-        </svg>
-      </div>
-      <div>
-        <div class="login-brand__name"><%= appName %></div>
-        <div class="login-brand__sub">repo.kewelserver.one</div>
-      </div>
+<div style="width:100vw;height:100vh;background:var(--bg);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative">
+
+  <!-- crosshair grid background -->
+  <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:0.06">
+    <defs>
+      <pattern id="cg" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+        <line x1="20" y1="0"  x2="20" y2="6"  stroke="white" stroke-width="0.5"/>
+        <line x1="0"  y1="20" x2="6"  y2="20" stroke="white" stroke-width="0.5"/>
+        <line x1="34" y1="20" x2="40" y2="20" stroke="white" stroke-width="0.5"/>
+        <line x1="20" y1="34" x2="20" y2="40" stroke="white" stroke-width="0.5"/>
+      </pattern>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#cg)"/>
+  </svg>
+
+  <!-- Terminal window -->
+  <div style="width:min(540px,90vw);background:#0d0d0d;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,0.8);position:relative;z-index:1">
+
+    <!-- Title bar -->
+    <div style="display:flex;align-items:center;gap:6px;padding:9px 14px;background:#1a1a1a;border-bottom:1px solid #2a2a2a">
+      <div style="width:10px;height:10px;border-radius:50%;background:#f87171;opacity:0.8"></div>
+      <div style="width:10px;height:10px;border-radius:50%;background:#fbbf24;opacity:0.8"></div>
+      <div style="width:10px;height:10px;border-radius:50%;background:#34d058;opacity:0.8"></div>
+      <span style="font-family:'Space Mono',monospace;font-size:10px;color:#546080;margin-left:8px">auth — repo-app</span>
     </div>
 
-    <!-- Flash -->
-    <% if (flash) { %>
-      <div class="alert alert--<%= flash.type === 'error' ? 'error' : 'success' %>">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <% if (flash.type === 'error') { %>
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          <% } else { %>
-            <polyline points="20 6 9 17 4 12"/>
-          <% } %>
-        </svg>
-        <%- flash.message %>
-      </div>
-    <% } %>
+    <!-- Terminal body -->
+    <div style="padding:20px 22px;font-family:'Space Mono',monospace;font-size:12px;line-height:1.9;color:#c8d4f0">
+      <div style="color:var(--sb-text,#c8d4f0)">repo-app v2.0 — Warehouse Reporting System</div>
+      <div style="color:var(--success,#34d058)">Connecting to kewelserver.one... OK</div>
+      <div style="color:var(--sb-text,#c8d4f0);margin-top:4px">Authentication required. Enter credentials below.</div>
 
-    <!-- Card -->
-    <div class="card">
-      <div class="card__head">
-        <div>
-          <div class="card__title">Warehouse Reporting</div>
-          <div class="card__subtitle">Admin access only</div>
+      <% if (flash) { %>
+        <div style="margin-top:10px;color:<%= flash.type === 'error' ? '#f87171' : '#34d058' %>">
+          <% if (flash.type === 'error') { %>! error: <%- flash.message %><% } else { %>✓ <%- flash.message %><% } %>
         </div>
-      </div>
-      <div class="card__body">
-        <form method="POST" action="/login">
-          <div class="field-group" style="margin-bottom:14px">
-            <label class="field-label" for="email">Email address</label>
-            <input class="field" type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email" required />
-          </div>
-          <div class="field-group" style="margin-bottom:20px">
-            <label class="field-label" for="password">Password</label>
-            <input class="field" type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" required />
-          </div>
-          <button type="submit" class="btn btn--primary" style="width:100%">Sign in</button>
-        </form>
-      </div>
+      <% } %>
+
+      <form method="POST" action="/login" style="margin-top:14px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="color:var(--accent,#4f8ef7);flex-shrink:0">email:   </span>
+          <input
+            type="email"
+            name="email"
+            placeholder="user@example.com"
+            autocomplete="email"
+            required
+            autofocus
+            style="background:transparent;border:none;outline:none;color:#eef0ff;font-family:'Space Mono',monospace;font-size:12px;flex:1;caret-color:var(--accent,#4f8ef7)"
+          />
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px">
+          <span style="color:var(--accent,#4f8ef7);flex-shrink:0">pass:    </span>
+          <input
+            type="password"
+            name="password"
+            placeholder="••••••••"
+            autocomplete="current-password"
+            required
+            style="background:transparent;border:none;outline:none;color:#eef0ff;font-family:'Space Mono',monospace;font-size:12px;flex:1;caret-color:var(--accent,#4f8ef7)"
+          />
+        </div>
+        <div style="border-top:1px solid #2a2a2a;padding-top:12px;display:flex;align-items:center;justify-content:space-between">
+          <span style="color:#2d3550;font-size:11px">repo.kewelserver.one</span>
+          <button type="submit" style="background:transparent;border:1px solid #2a3050;border-radius:3px;color:#6472a0;font-family:'Space Mono',monospace;font-size:11px;padding:4px 12px;cursor:pointer;transition:all 0.1s"
+            onmouseover="var a=getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();this.style.borderColor=a;this.style.color=a"
+            onmouseout="this.style.borderColor='#2a3050';this.style.color='#6472a0'">
+            authenticate →
+          </button>
+        </div>
+      </form>
     </div>
+
   </div>
 </div>
 

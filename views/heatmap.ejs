@@ -1,112 +1,107 @@
 <%- include('partials/head', { pageTitle: 'Heatmap' }) %>
 <div class="app-shell">
 <%- include('partials/header', { activePage: 'heatmap' }) %>
-<main class="app-main">
-<div class="page">
+<div class="main">
+<%- include('partials/topbar', { pageLabel: 'Heatmap' }) %>
+<div class="pc">
 
-  <div class="page-hero">
-    <div class="page-hero__eyebrow">Pick Activity</div>
-    <h1 class="page-hero__title">Warehouse Heatmap</h1>
-    <div class="page-hero__chips">
-      <span class="chip" id="heatmapDateChip">Loading snapshots...</span>
-      <span class="chip" id="heatmapSnapshotStatusChip">Checking...</span>
-      <span class="chip" id="heatmapLocationChip">0 locations</span>
-      <span class="chip" id="heatmapPickChip">0 picks</span>
+  <div class="phead">
+    <div class="ph">
+      <div>
+        <span class="pt">Warehouse Heatmap</span>
+        <span class="ps">Pick activity by location</span>
+      </div>
+      <div class="ph-chips">
+        <span class="chip" id="heatmapDateChip">Loading...</span>
+        <span class="chip" id="heatmapSnapshotStatusChip">Checking...</span>
+        <span class="chip" id="heatmapLocationChip">0 locations</span>
+        <span class="chip" id="heatmapPickChip">0 picks</span>
+      </div>
     </div>
   </div>
 
-  <section class="heatmap-fullscreen-shell" id="heatmapLayout">
+  <div class="card-edge" id="heatmapLayout">
 
     <!-- Toolbar -->
-    <div class="card heatmap-toolbar-card">
-      <div class="card__head">
-        <div class="card__title">Scene Controls</div>
-        <span class="chip" id="heatmapStatusChip">Loading...</span>
+    <div class="tb">
+      <div class="fg">
+        <div class="fl">Client</div>
+        <select class="fi" id="heatmapClientSelect" style="width:160px">
+          <% clientChoices.forEach(c => { %>
+            <option value="<%= c.code %>" <%= c.code === selectedClient ? 'selected' : '' %>><%= c.name %></option>
+          <% }) %>
+        </select>
       </div>
-      <div class="card__body heatmap-toolbar-body">
-        <div class="field-group">
-          <label class="field-label">Client</label>
-          <select class="field field--select" id="heatmapClientSelect" style="width:180px">
-            <% clientChoices.forEach(c => { %>
-              <option value="<%= c.code %>" <%= c.code === selectedClient ? 'selected' : '' %>><%= c.name %></option>
-            <% }) %>
-          </select>
+      <div class="fg">
+        <div class="fl">View mode</div>
+        <select class="fi" id="heatmapModeSelect" style="width:160px">
+          <option value="latest">Latest complete day</option>
+          <option value="date">Specific date</option>
+        </select>
+      </div>
+      <div class="fg" id="heatmapDateField" hidden>
+        <div class="fl">Snapshot date</div>
+        <select class="fi" id="heatmapDateSelect" style="width:140px">
+          <option value="">No snapshots yet</option>
+        </select>
+      </div>
+      <div class="fg">
+        <div class="fl">Heat metric</div>
+        <select class="fi" id="heatmapMetricSelect" style="width:130px">
+          <option value="pick_count">Pick count</option>
+          <option value="pick_qty">Pick quantity</option>
+        </select>
+      </div>
+      <div class="fg">
+        <div class="fl">Camera</div>
+        <select class="fi" id="heatmapCameraModeSelect" style="width:120px">
+          <option value="orbit">Perspective</option>
+          <option value="top">Top-down</option>
+          <option value="fps">FPS</option>
+        </select>
+      </div>
+      <div class="fg">
+        <div class="fl">Colour mode</div>
+        <select class="fi" id="heatmapColourModeSelect" style="width:120px">
+          <option value="heatmap">Heatmap</option>
+          <option value="binsize">Bin size</option>
+          <option value="zone">Zone</option>
+          <option value="level">Level</option>
+        </select>
+      </div>
+      <div class="fg heatmap-level-filter-field">
+        <div class="fl">Visible levels</div>
+        <div class="heatmap-level-filter">
+          <input class="fi" type="number" id="heatmapLevelMin" min="0" max="99" placeholder="Min" style="width:60px">
+          <span style="color:var(--text-soft);font-size:11px">–</span>
+          <input class="fi" type="number" id="heatmapLevelMax" min="0" max="99" placeholder="Max" style="width:60px">
+          <button class="btn btn--g btn--sm" id="heatmapLevelResetButton">All</button>
         </div>
-        <div class="field-group">
-          <label class="field-label">View mode</label>
-          <select class="field field--select" id="heatmapModeSelect" style="width:180px">
-            <option value="latest">Latest complete day</option>
-            <option value="date">Specific date</option>
-          </select>
-        </div>
-        <div class="field-group" id="heatmapDateField" hidden>
-          <label class="field-label">Snapshot date</label>
-          <select class="field field--select" id="heatmapDateSelect" style="width:150px">
-            <option value="">No snapshots yet</option>
-          </select>
-        </div>
-        <div class="field-group">
-          <label class="field-label">Heat metric</label>
-          <select class="field field--select" id="heatmapMetricSelect" style="width:150px">
-            <option value="pick_count">Pick count</option>
-            <option value="pick_qty">Pick quantity</option>
-          </select>
-        </div>
-        <div class="field-group">
-          <label class="field-label">Camera</label>
-          <select class="field field--select" id="heatmapCameraModeSelect" style="width:140px">
-            <option value="orbit">Perspective</option>
-            <option value="top">Top-down</option>
-            <option value="fps">FPS</option>
-          </select>
-        </div>
-        <div class="field-group">
-          <label class="field-label">Colour mode</label>
-          <select class="field field--select" id="heatmapColourModeSelect" style="width:140px">
-            <option value="heatmap">Heatmap</option>
-            <option value="binsize">Bin size</option>
-            <option value="zone">Zone</option>
-            <option value="level">Level</option>
-          </select>
-        </div>
-        <div class="field-group heatmap-level-filter-field">
-          <label class="field-label">Visible levels</label>
-          <div class="heatmap-level-filter">
-            <input class="field" type="number" id="heatmapLevelMin" min="0" max="99" placeholder="Min" style="width:68px">
-            <span style="color:var(--text-soft);font-size:0.85rem">–</span>
-            <input class="field" type="number" id="heatmapLevelMax" min="0" max="99" placeholder="Max" style="width:68px">
-            <button class="btn btn--ghost btn--sm" id="heatmapLevelResetButton">All</button>
-          </div>
-        </div>
-        <div class="field-group">
-          <label class="field-label">Find location</label>
-          <input class="field" type="search" id="heatmapSearchInput" placeholder="e.g. WF44" style="width:180px">
-        </div>
-        <label class="heatmap-toggle">
-          <input type="checkbox" id="heatmapPickedOnly"> Only picked
-        </label>
-        <label class="heatmap-toggle">
-          <input type="checkbox" id="heatmapOccupiedOnly"> Only occupied
-        </label>
-        <div class="heatmap-toolbar-actions">
-          <button class="btn btn--ghost btn--sm" id="heatmapResetCameraButton">Reset camera</button>
-          <button class="btn btn--primary btn--sm" id="heatmapReloadButton">Reload</button>
-        </div>
+      </div>
+      <div class="fg">
+        <div class="fl">Find location</div>
+        <input class="fi" type="search" id="heatmapSearchInput" placeholder="e.g. WF44" style="width:130px">
+      </div>
+      <label class="heatmap-toggle">
+        <input type="checkbox" id="heatmapPickedOnly"> Only picked
+      </label>
+      <label class="heatmap-toggle">
+        <input type="checkbox" id="heatmapOccupiedOnly"> Only occupied
+      </label>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:flex-end">
+        <span class="chip" id="heatmapStatusChip">Loading...</span>
+        <button class="btn btn--g btn--sm" id="heatmapResetCameraButton">Reset camera</button>
+        <button class="btn btn--g btn--sm" id="heatmapSettingsButton">⚙ Settings</button>
+        <button class="btn btn--g btn--sm" id="heatmapFullscreenButton">Full screen</button>
+        <button class="btn btn--primary btn--sm" id="heatmapReloadButton">Reload</button>
       </div>
     </div>
 
     <!-- Scene + sidebar -->
-    <div class="heatmap-layout-grid">
+    <div class="heatmap-layout-grid" style="flex:1;overflow:hidden">
 
       <!-- 3D scene -->
-      <div class="card heatmap-scene-card">
-        <div class="card__head">
-          <div class="card__title">3D Warehouse Rack View</div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <button class="btn btn--ghost btn--sm" id="heatmapSettingsButton">&#9881; Settings</button>
-            <button class="btn btn--ghost btn--sm" id="heatmapFullscreenButton">Full screen</button>
-          </div>
-        </div>
+      <div class="card heatmap-scene-card" style="border-radius:0;border:none;border-right:1px solid var(--border)">
         <div class="heatmap-scene-wrap">
           <canvas id="heatmapCanvas"></canvas>
 
@@ -152,20 +147,18 @@
           <div class="heatmap-legend">
             <div class="heatmap-legend__bar"></div>
             <div class="heatmap-legend__labels">
-              <span>Cool</span>
-              <span>Warm</span>
-              <span>Hot</span>
+              <span>Cool</span><span>Warm</span><span>Hot</span>
             </div>
           </div>
         </div>
       </div>
 
       <!-- Sidebar -->
-      <aside class="card heatmap-sidebar">
+      <aside class="heatmap-sidebar" style="overflow-y:auto">
         <div class="card__head"><div class="card__title">Location Detail</div></div>
-        <div class="card__body" style="display:grid;gap:16px">
+        <div style="padding:16px;display:grid;gap:14px">
 
-          <p id="heatmapDetailHint" style="color:var(--text-soft);font-size:0.875rem;margin:0">Click a rack cube in the scene to inspect it.</p>
+          <p id="heatmapDetailHint" style="color:var(--text-soft);font-size:12px;margin:0">Click a rack cube in the scene to inspect it.</p>
 
           <div class="heatmap-stats-grid">
             <div class="heatmap-stat-card">
@@ -189,18 +182,18 @@
           </div>
 
           <div>
-            <div class="card__subtitle" style="margin-bottom:10px">Hottest aisles</div>
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-soft);font-family:var(--mono);margin-bottom:8px">Hottest aisles</div>
             <div id="heatmapHotAisles"></div>
           </div>
 
         </div>
       </aside>
-    </div>
 
-  </section>
+    </div>
+  </div>
 
 </div>
-</main>
+</div>
 </div>
 
 <script src="/js/site.js"></script>

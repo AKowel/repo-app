@@ -1196,6 +1196,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
     const opAreaMap       = new Map();
     const itemGroupMap    = new Map();
     const channelMap      = new Map();
+    const channelDetailMap = new Map(); // ch -> { skuMap, locationMap }
     const dailyMap        = new Map();
 
     let totalPickQty    = 0, totalLineCount = 0;
@@ -1254,7 +1255,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
 
         // skuMap
         const skuE = getOrInit(skuMap, sku, () => ({
-          sku, pick_qty:0, line_count:0, orders: new Set(), locations: new Set(),
+          sku, item_group: grp, pick_qty:0, line_count:0, orders: new Set(), locations: new Set(),
           aisles: new Set(), high_level_pick_qty: 0, operating_areas: new Set(),
           pc_pick_qty: 0, pc_line_count: 0, pc_orders: new Set(), pc_locations: new Set(),
           non_pc_pick_qty: 0, non_pc_line_count: 0, non_pc_orders: new Set(),
@@ -1280,8 +1281,10 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
           operating_area: enrich.operating_area, bin_size: enrich.bin_size,
           bin_type: enrich.bin_type, max_bin_qty: enrich.max_bin_qty,
           pick_qty: 0, line_count: 0, skus: new Set(), orders: new Set(),
+          item_group_picks: new Map(),
         }));
         locE.pick_qty += qty; locE.line_count++; locE.skus.add(sku); locE.orders.add(ord);
+        locE.item_group_picks.set(grp, (locE.item_group_picks.get(grp) || 0) + qty);
 
         // aisleMap
         const aisleE = getOrInit(aisleMap, pfx, () => ({
@@ -1318,6 +1321,21 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         // channelMap
         const chE = getOrInit(channelMap, ch, () => ({ channel: ch, label: clientChannelLabels[ch] || ch, pick_qty:0, line_count:0, orders: new Set(), skus: new Set() }));
         chE.pick_qty += qty; chE.line_count++; chE.orders.add(ord); chE.skus.add(sku);
+
+        // channelDetailMap — per-channel top SKUs & locations
+        const chDet = getOrInit(channelDetailMap, ch, () => ({ skuMap: new Map(), locationMap: new Map() }));
+        const chDetSku = getOrInit(chDet.skuMap, sku, () => ({
+          sku, item_group: grp, pick_qty: 0, line_count: 0, orders: new Set(), locations: new Set(),
+        }));
+        chDetSku.pick_qty += qty; chDetSku.line_count++; chDetSku.orders.add(ord); chDetSku.locations.add(loc);
+        const chDetLoc = getOrInit(chDet.locationMap, loc, () => ({
+          location: loc, aisle_prefix: pfx, level: parts.level, level_num: levelNum,
+          operating_area: enrich.operating_area, bin_size: enrich.bin_size,
+          bin_type: enrich.bin_type, max_bin_qty: enrich.max_bin_qty,
+          pick_qty: 0, line_count: 0, skus: new Set(), item_group_picks: new Map(),
+        }));
+        chDetLoc.pick_qty += qty; chDetLoc.line_count++; chDetLoc.skus.add(sku);
+        chDetLoc.item_group_picks.set(grp, (chDetLoc.item_group_picks.get(grp) || 0) + qty);
 
         // dailyMap
         const dayE = getOrInit(dailyMap, snapDate, () => ({ date: snapDate, pick_qty:0, line_count:0, orders: new Set(), skus: new Set() }));
@@ -1356,16 +1374,22 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
 
     const topSkus = [...skuMap.values()]
       .sort(sortRank).slice(0, limit)
-      .map(e => ({ sku: e.sku, pick_qty: e.pick_qty, line_count: e.line_count,
+      .map(e => ({ sku: e.sku, item_group: e.item_group, pick_qty: e.pick_qty, line_count: e.line_count,
                    order_count: e.orders.size, location_count: e.locations.size,
                    aisle_count: e.aisles.size, share_of_picks: share(e.pick_qty) }));
 
     const topLocations = [...locationMap.values()]
       .sort(sortRank).slice(0, 100)
-      .map(e => ({ location: e.location, aisle_prefix: e.aisle_prefix, level: e.level,
-                   operating_area: e.operating_area, bin_size: e.bin_size,
-                   bin_type: e.bin_type, max_bin_qty: e.max_bin_qty,
-                   pick_qty: e.pick_qty, line_count: e.line_count, sku_count: e.skus.size }));
+      .map(e => {
+        let primaryItemGroup = '';
+        let maxGrpQty = 0;
+        for (const [g, q] of e.item_group_picks) { if (q > maxGrpQty) { maxGrpQty = q; primaryItemGroup = g; } }
+        return { location: e.location, aisle_prefix: e.aisle_prefix, level: e.level,
+                 operating_area: e.operating_area, bin_size: e.bin_size,
+                 bin_type: e.bin_type, max_bin_qty: e.max_bin_qty,
+                 pick_qty: e.pick_qty, line_count: e.line_count, sku_count: e.skus.size,
+                 primary_item_group: primaryItemGroup };
+      });
 
     const topAisles = [...aisleMap.values()]
       .sort(sortRank).slice(0, 50)
@@ -1402,6 +1426,30 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
       .sort(sortRank)
       .map(e => ({ channel: e.channel, label: e.label, pick_qty: e.pick_qty, line_count: e.line_count,
                    order_count: e.orders.size, sku_count: e.skus.size, share_of_picks: share(e.pick_qty) }));
+
+    const channelDetails = {};
+    for (const [ch, det] of channelDetailMap) {
+      const chTotal = channelMap.get(ch)?.pick_qty || 0;
+      const chShare = (v) => chTotal > 0 ? Math.round((v / chTotal) * 10000) / 100 : 0;
+      channelDetails[ch] = {
+        label: clientChannelLabels[ch] || ch,
+        top_skus: [...det.skuMap.values()]
+          .sort(sortRank).slice(0, limit)
+          .map(e => ({ sku: e.sku, item_group: e.item_group, pick_qty: e.pick_qty,
+                       line_count: e.line_count, order_count: e.orders.size,
+                       location_count: e.locations.size, share_of_picks: chShare(e.pick_qty) })),
+        top_locations: [...det.locationMap.values()]
+          .sort(sortRank).slice(0, 100)
+          .map(e => {
+            let primaryItemGroup = ""; let maxGrpQty = 0;
+            for (const [g, q] of e.item_group_picks) { if (q > maxGrpQty) { maxGrpQty = q; primaryItemGroup = g; } }
+            return { location: e.location, aisle_prefix: e.aisle_prefix, level: e.level,
+                     operating_area: e.operating_area, bin_size: e.bin_size, bin_type: e.bin_type,
+                     max_bin_qty: e.max_bin_qty, pick_qty: e.pick_qty, line_count: e.line_count,
+                     sku_count: e.skus.size, primary_item_group: primaryItemGroup };
+          }),
+      };
+    }
 
     const dailyBreakdown = [...dailyMap.values()]
       .sort((a, b) => b.date.localeCompare(a.date))
@@ -1541,6 +1589,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
       operating_area_breakdown: opAreaBreakdown,
       item_group_breakdown:    itemGroupBreakdown,
       channel_breakdown:       channelBreakdown,
+      channel_details:         channelDetails,
       daily_breakdown:         dailyBreakdown,
       replenishment: {
         note: binlocAvail
