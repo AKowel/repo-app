@@ -758,7 +758,7 @@ app.get("/api/order-lines/export", requireAdminApi, async (req, res) => {
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
-    const workbook  = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: res });
+    const workbook  = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: res, useStyles: false, useSharedStrings: false });
     const worksheet = workbook.addWorksheet("Order Lines");
     worksheet.columns = [
       { header: "Order No",  key: "a", width: 16 },
