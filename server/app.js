@@ -20,6 +20,19 @@ const FANDM_LAYOUT     = loadJsonFile(path.join(ITEMTRACKER_DATA, "fandm-layout-
 const LAYOUT_OVERRIDES = loadJsonFile(path.join(ITEMTRACKER_DATA, "layout-overrides.json"));
 const ASSET_VERSION    = String(Date.now());
 
+const DEFAULT_BIN_SIZES = {
+  F2: { height: 310,  width: 650,  depth: 600  },
+  F4: { height: 310,  width: 325,  depth: 600  },
+  F8: { height: 310,  width: 160,  depth: 300  },
+  CG: { height: 1650, width: 1200, depth: 1000 },
+  CF: { height: 2200, width: 1200, depth: 1000 },
+  CP: { height: 800,  width: 425,  depth: 900  },
+  CU: { height: 350,  width: 433,  depth: 900  },
+  CL: { height: 350,  width: 1200, depth: 900  },
+  CB: { height: 1150, width: 1200, depth: 1000 },
+  CR: { height: 510,  width: 675,  depth: 900  },
+};
+
 // ── Heatmap helpers ───────────────────────────────────────────────────────────
 
 // Mirrors itemtracker's parseHeatmapLocation — 2-char prefix, 2-digit bay, 2-digit level, 2-digit slot
@@ -55,8 +68,41 @@ function normalizeClientCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function normalizeBinSizeCode(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function normalizeDimensionNumber(value) {
+  const num = Number(value || 0);
+  return Number.isFinite(num) && num > 0 ? num : 0;
+}
+
+function normalizeBinSizeDimensions(value) {
+  if (!value || typeof value !== "object") return null;
+  const height = normalizeDimensionNumber(value.height ?? value.height_mm ?? value.h);
+  const width  = normalizeDimensionNumber(value.width  ?? value.width_mm  ?? value.w);
+  const depth  = normalizeDimensionNumber(value.depth  ?? value.depth_mm  ?? value.d);
+  if (!(height > 0) || !(width > 0) || !(depth > 0)) return null;
+  return { height, width, depth };
+}
+
+function getConfiguredBinSizes() {
+  const merged = { ...DEFAULT_BIN_SIZES, ...(LAYOUT_OVERRIDES?.bin_sizes || {}) };
+  const out = {};
+  for (const [rawCode, rawDims] of Object.entries(merged)) {
+    const code = normalizeBinSizeCode(rawCode);
+    const dims = normalizeBinSizeDimensions(rawDims);
+    if (code && dims) out[code] = dims;
+  }
+  return out;
+}
+
 function getBinlocLocation(row) {
   return String(row?.BLBINL || row?.bin_location || row?.location || "").trim().toUpperCase();
+}
+
+function getBinlocBinSize(row) {
+  return normalizeBinSizeCode(row?.BLSCOD || row?.bin_size || row?.bin_size_code || "");
 }
 
 function getBinlocRowClientCode(row) {
@@ -515,7 +561,7 @@ app.get("/api/heatmap-data", requireAdminApi, async (req, res) => {
     if (client === "FANDMKET" && FANDM_LAYOUT) {
       layout    = FANDM_LAYOUT;
       overrides = LAYOUT_OVERRIDES || {};
-      bin_sizes = LAYOUT_OVERRIDES?.bin_sizes || {};
+      bin_sizes = getConfiguredBinSizes();
     } else {
       layout    = { zones: [{ zone_key: "zone_1", zone_label: "Warehouse", aisles: [] }] };
       overrides = {};
@@ -2012,6 +2058,88 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
 // ── Admin page ────────────────────────────────────────────────────────────
 app.get("/admin", requireAdminPage, (_req, res) => {
   res.render("admin", { clientChoices: CLIENT_CHOICES });
+});
+
+// API: admin active bin size dimensions
+app.get("/api/admin/bin-sizes", requireAdminApi, async (req, res) => {
+  const client = normalizeClientCode(req.query.client || DEFAULT_CLIENT);
+  try {
+    const configuredBinSizes = getConfiguredBinSizes();
+    const { rows: rawRows = [], meta, fromCache } = await service.loadSnapshot("binloc", client, null);
+    const activeBySize = new Map();
+
+    let activeLocationCount = 0;
+    let activeLocationsWithoutSize = 0;
+
+    for (const row of rawRows) {
+      const rowClientCode = getBinlocRowClientCode(row);
+      if (rowClientCode && rowClientCode !== client) continue;
+
+      const status = String(row.BLSTS || row.status || "Y").trim().toUpperCase();
+      if (status && status !== "Y") continue;
+
+      const location = getBinlocLocation(row);
+      if (!location) continue;
+
+      activeLocationCount++;
+
+      const binSize = getBinlocBinSize(row);
+      if (!binSize) activeLocationsWithoutSize++;
+
+      const key = binSize || "__blank__";
+      const entry = activeBySize.get(key) || {
+        bin_size: binSize,
+        label: binSize || "Unspecified",
+        location_count: 0,
+        example_locations: [],
+      };
+      entry.location_count++;
+      if (entry.example_locations.length < 8) entry.example_locations.push(location);
+      activeBySize.set(key, entry);
+    }
+
+    const rows = [...activeBySize.values()]
+      .map(entry => {
+        const dims = configuredBinSizes[entry.bin_size] || null;
+        const volume = dims ? dims.height * dims.width * dims.depth : null;
+        return {
+          ...entry,
+          dimensions_configured: Boolean(dims),
+          height_mm: dims ? dims.height : null,
+          width_mm:  dims ? dims.width  : null,
+          depth_mm:  dims ? dims.depth  : null,
+          volume_mm3: volume,
+          usable_volume_mm3: volume ? Math.round(volume * 0.8) : null,
+        };
+      })
+      .sort((a, b) => {
+        if (!a.bin_size && b.bin_size) return 1;
+        if (a.bin_size && !b.bin_size) return -1;
+        return String(a.bin_size || "").localeCompare(String(b.bin_size || ""));
+      });
+
+    const configuredActiveCount = rows.filter(row => row.dimensions_configured).length;
+
+    return res.json({
+      ok: true,
+      client,
+      meta,
+      fromCache,
+      summary: {
+        active_location_count: activeLocationCount,
+        active_bin_size_count: rows.length,
+        configured_active_bin_size_count: configuredActiveCount,
+        missing_active_bin_size_count: rows.length - configuredActiveCount,
+        active_locations_without_bin_size: activeLocationsWithoutSize,
+        configured_bin_size_count: Object.keys(configuredBinSizes).length,
+        default_bin_size_count: Object.keys(DEFAULT_BIN_SIZES).length,
+        tracker_overrides_loaded: Boolean(LAYOUT_OVERRIDES),
+      },
+      rows,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
 });
 
 // ── API: admin status ─────────────────────────────────────────────────────

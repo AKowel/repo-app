@@ -54,6 +54,24 @@
     </div>
   </div>
 
+  <!-- Active bin sizes -->
+  <div class="card" style="margin-bottom:10px">
+    <div class="card__head">
+      <div class="card__title">Active Bin Sizes</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <select class="fi" id="binSizeClient" style="width:150px" onchange="loadBinSizes()">
+          <% clientChoices.forEach(c => { %>
+            <option value="<%= c.code %>"><%= c.name %></option>
+          <% }) %>
+        </select>
+        <button class="btn btn--g btn--sm" onclick="loadBinSizes()">Refresh</button>
+      </div>
+    </div>
+    <div class="card__body--flush" id="binSizeTable">
+      <div class="loading-row"><div class="spinner"></div></div>
+    </div>
+  </div>
+
   <!-- Cache contents -->
   <div class="card" style="margin-bottom:10px">
     <div class="card__head">

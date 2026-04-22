@@ -4,6 +4,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     loadStatus();
     loadSnapshotSummary();
+    loadBinSizes();
   });
 
   // ── Status ────────────────────────────────────────────────────────────
@@ -88,7 +89,67 @@
       .catch(function (err) { showErr("snapshotSummary", err.message); });
   };
 
-  // ── Snapshot debugger ─────────────────────────────────────────────────
+  // Active bin sizes
+  window.loadBinSizes = function () {
+    var el = document.getElementById("binSizeTable");
+    if (!el) return;
+
+    var clientEl = document.getElementById("binSizeClient");
+    var client = clientEl ? clientEl.value : "FANDMKET";
+    el.innerHTML = "<div class='loading-row'><div class='spinner'></div> Loading active bin sizes...</div>";
+
+    fetch("/api/admin/bin-sizes?client=" + encodeURIComponent(client))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) { showErr("binSizeTable", data.error); return; }
+        renderBinSizes(data);
+      })
+      .catch(function (err) { showErr("binSizeTable", err.message); });
+  };
+
+  function renderBinSizes(data) {
+    var el = document.getElementById("binSizeTable");
+    var rows = data.rows || [];
+    var summary = data.summary || {};
+
+    if (!rows.length) {
+      el.innerHTML = "<div class='empty-state'><div class='empty-state__title'>No active bin sizes found</div><div class='empty-state__desc'>The latest BINLOC snapshot has no active locations for this client.</div></div>";
+      return;
+    }
+
+    var html = "<div style='display:flex;flex-wrap:wrap;gap:8px;padding:10px;border-bottom:1px solid var(--border)'>";
+    html += "<span class='chip'>Active locations " + fmtInt(summary.active_location_count) + "</span>";
+    html += "<span class='chip chip--success'>Sized " + fmtInt(summary.configured_active_bin_size_count) + "</span>";
+    html += "<span class='chip " + (summary.missing_active_bin_size_count ? "chip--warning" : "chip--success") + "'>Missing " + fmtInt(summary.missing_active_bin_size_count) + "</span>";
+    html += "<span class='chip'>Definitions " + fmtInt(summary.configured_bin_size_count) + "</span>";
+    html += "</div>";
+
+    html += "<div class='table-wrap'><table class='data-table'><thead><tr>";
+    html += "<th>Bin Size</th><th>Status</th><th>Active Locations</th><th>Height mm</th><th>Width mm</th><th>Depth mm</th><th>Volume mm3</th><th>Usable 80%</th><th>Examples</th>";
+    html += "</tr></thead><tbody>";
+
+    rows.forEach(function (row) {
+      var status = row.dimensions_configured
+        ? "<span class='chip chip--success'>Sized</span>"
+        : "<span class='chip chip--warning'>Needs size</span>";
+      html += "<tr>";
+      html += "<td class='m'><strong>" + esc(row.label || row.bin_size || "Unspecified") + "</strong></td>";
+      html += "<td>" + status + "</td>";
+      html += "<td>" + fmtInt(row.location_count) + "</td>";
+      html += "<td>" + fmtMaybe(row.height_mm) + "</td>";
+      html += "<td>" + fmtMaybe(row.width_mm) + "</td>";
+      html += "<td>" + fmtMaybe(row.depth_mm) + "</td>";
+      html += "<td>" + fmtMaybe(row.volume_mm3) + "</td>";
+      html += "<td>" + fmtMaybe(row.usable_volume_mm3) + "</td>";
+      html += "<td style='font-family:var(--mono);font-size:11px'>" + esc((row.example_locations || []).join(", ")) + "</td>";
+      html += "</tr>";
+    });
+
+    html += "</tbody></table></div>";
+    el.innerHTML = html;
+  }
+
+  // Snapshot debugger
   window.runDebug = function () {
     var col    = document.getElementById("dbgCollection").value;
     var client = document.getElementById("dbgClient").value;
@@ -141,6 +202,17 @@
   function showErr(id, msg) {
     var el = document.getElementById(id);
     if (el) el.innerHTML = "<div class='alert alert--error' style='margin:0'>" + esc(msg) + "</div>";
+  }
+
+  function fmtInt(value) {
+    var num = Number(value || 0);
+    return Number.isFinite(num) ? Math.round(num).toLocaleString() : "0";
+  }
+
+  function fmtMaybe(value) {
+    if (value === null || value === undefined || value === "") return "&mdash;";
+    var num = Number(value);
+    return Number.isFinite(num) ? Math.round(num).toLocaleString() : esc(value);
   }
 
   function esc(s) {
