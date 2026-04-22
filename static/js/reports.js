@@ -3,6 +3,11 @@
 let _data = null;
 const _locExpanded = { above20: true, below20: true };
 const _chLocExpanded = {}; // ch -> { above20: bool, below20: bool }
+const PC_ZONE_CHANNEL_CHOICES = [
+  { code: "C", label: "Customer Web" },
+  { code: "S", label: "Store Replen" },
+];
+let _pcZoneChannels = new Set(PC_ZONE_CHANNEL_CHOICES.map((ch) => ch.code));
 
 const selClient = () => document.getElementById("rSelClient");
 const selMode = () => document.getElementById("rSelMode");
@@ -172,6 +177,11 @@ function getSelectedChannels() {
   return [...document.querySelectorAll("#rChannelDropdown input:checked")].map((cb) => cb.value);
 }
 
+function getSelectedPcZoneChannels() {
+  const selected = [..._pcZoneChannels].filter((code) => PC_ZONE_CHANNEL_CHOICES.some((ch) => ch.code === code));
+  return selected.length ? selected : PC_ZONE_CHANNEL_CHOICES.map((ch) => ch.code);
+}
+
 function updateChannelLabel() {
   const selected = getSelectedChannels();
   document.getElementById("rChannelTrigger").textContent = selected.length === 0 ? "All channels" : selected.join(", ");
@@ -194,6 +204,7 @@ function buildQuery() {
 
   const channels = getSelectedChannels();
   if (channels.length) params.set("channels", channels.join(","));
+  params.set("pc_zone_channels", getSelectedPcZoneChannels().join(","));
   if (hideGrp147()) params.set("hide_group_147", "1");
   return params;
 }
@@ -507,8 +518,21 @@ function renderPcZone(pcZone, meta) {
   const topNonPcSkus = hideGrp147()
     ? (pcZone?.top_non_pc_skus || []).filter(r => String(r.item_group) !== "147")
     : (pcZone?.top_non_pc_skus || []);
+  const selectedPcZoneChannels = new Set(getSelectedPcZoneChannels());
+  const pcZoneChannelControls = PC_ZONE_CHANNEL_CHOICES.map((ch) => `
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;font-family:var(--mono);font-size:10px;color:var(--text-soft)">
+      <input type="checkbox" class="rPcZoneChannelCb" value="${escAttr(ch.code)}"
+        style="accent-color:var(--accent);width:12px;height:12px;cursor:pointer"
+        ${selectedPcZoneChannels.has(ch.code) ? "checked" : ""} />
+      ${escHtml(ch.label)}
+    </label>
+  `).join("");
 
-  let html = '<div class="reports-section"><div class="reports-section__title">PC Zone Mix</div></div>';
+  let html = `
+    <div class="reports-section" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div class="reports-section__title">PC Zone Mix</div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">${pcZoneChannelControls}</div>
+    </div>`;
 
   if (note) {
     html += `<div class="reports-binloc-notice">
@@ -591,6 +615,17 @@ function renderPcZone(pcZone, meta) {
   `;
 
   el.innerHTML = html;
+  el.querySelectorAll(".rPcZoneChannelCb").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const checked = [...el.querySelectorAll(".rPcZoneChannelCb:checked")].map((input) => input.value);
+      if (!checked.length) {
+        cb.checked = true;
+        return;
+      }
+      _pcZoneChannels = new Set(checked);
+      loadReports();
+    });
+  });
 }
 
 function renderDaily(dailyBreakdown) {

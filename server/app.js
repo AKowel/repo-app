@@ -338,6 +338,7 @@ const CHANNEL_LABELS = {
 };
 
 const HIGH_LEVEL_THRESHOLD = 20;
+const PC_ZONE_CHANNELS = new Set(["C", "S"]);
 
 // ── Service singleton ─────────────────────────────────────────────────────
 const service = new SnapshotService({
@@ -1324,7 +1325,7 @@ app.get("/reports", requireAdminPage, (req, res) => {
 
 // ── API: reports data ─────────────────────────────────────────────────────
 app.get("/api/reports-data", requireAdminApi, async (req, res) => {
-  const { client, mode, date, start, end, channels, rankBy, hide_group_147, hideGroup147: hideGroup147Camel } = req.query;
+  const { client, mode, date, start, end, channels, rankBy, pc_zone_channels, hide_group_147, hideGroup147: hideGroup147Camel } = req.query;
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 10), 100);
   const rank  = (rankBy === "line_count") ? "line_count" : "pick_qty";
   const hideGroup147 = hide_group_147 === "1" || hideGroup147Camel === "1";
@@ -1501,6 +1502,15 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
     const channelFilter = new Set(
       (channels || "").split(",").map(c => c.trim().toUpperCase()).filter(Boolean)
     );
+    const requestedPcZoneChannels = new Set(
+      String(pc_zone_channels || "")
+        .split(",")
+        .map(c => c.trim().toUpperCase())
+        .filter(c => PC_ZONE_CHANNELS.has(c))
+    );
+    const pcZoneChannelFilter = requestedPcZoneChannels.size > 0
+      ? requestedPcZoneChannels
+      : new Set(PC_ZONE_CHANNELS);
 
     // ── Step 5: Aggregate ─────────────────────────────────────────────────
     const skuMap          = new Map();
@@ -1514,11 +1524,15 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
     const channelMap      = new Map();
     const channelDetailMap = new Map(); // ch -> { skuMap, locationMap }
     const dailyMap        = new Map();
+    const pcZoneSkuMap    = new Map();
 
     let totalPickQty    = 0, totalLineCount = 0;
     let highLevelQty    = 0, highLevelLines = 0;
     let pcPickQty       = 0, pcLineCount = 0;
     let nonPcPickQty    = 0, nonPcLineCount = 0;
+    let pcZoneTotalPickQty = 0, pcZoneTotalLineCount = 0;
+    let pcZonePcPickQty    = 0, pcZonePcLineCount = 0;
+    let pcZoneNonPcPickQty = 0, pcZoneNonPcLineCount = 0;
 
     const allOrders     = new Set();
     const allSkus       = new Set();
@@ -1528,10 +1542,52 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
     const allItemGroups = new Set();
     const pcOrders      = new Set();
     const nonPcOrders   = new Set();
+    const pcZonePcOrders    = new Set();
+    const pcZoneNonPcOrders = new Set();
 
     function getOrInit(map, key, init) {
       if (!map.has(key)) map.set(key, init());
       return map.get(key);
+    }
+
+    function recordPcZoneActivity({ sku, grp, loc, ord, qty, isPcArea }) {
+      pcZoneTotalPickQty += qty;
+      pcZoneTotalLineCount++;
+      const entry = getOrInit(pcZoneSkuMap, sku, () => ({
+        sku,
+        item_group: grp,
+        pick_qty: 0,
+        line_count: 0,
+        orders: new Set(),
+        pc_pick_qty: 0,
+        pc_line_count: 0,
+        pc_orders: new Set(),
+        pc_locations: new Set(),
+        non_pc_pick_qty: 0,
+        non_pc_line_count: 0,
+        non_pc_orders: new Set(),
+      }));
+
+      entry.pick_qty += qty;
+      entry.line_count++;
+      if (ord) entry.orders.add(ord);
+
+      if (isPcArea) {
+        pcZonePcPickQty += qty;
+        pcZonePcLineCount++;
+        if (ord) pcZonePcOrders.add(ord);
+        entry.pc_pick_qty += qty;
+        entry.pc_line_count++;
+        if (ord) entry.pc_orders.add(ord);
+        if (loc) entry.pc_locations.add(loc);
+      } else {
+        pcZoneNonPcPickQty += qty;
+        pcZoneNonPcLineCount++;
+        if (ord) pcZoneNonPcOrders.add(ord);
+        entry.non_pc_pick_qty += qty;
+        entry.non_pc_line_count++;
+        if (ord) entry.non_pc_orders.add(ord);
+      }
     }
 
     for (let di = 0; di < loadedDates.length; di++) {
@@ -1540,8 +1596,6 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
 
       for (const row of rows) {
         const ch = String(row.order_channel || "").trim().toUpperCase();
-        if (channelFilter.size > 0 && !channelFilter.has(ch)) continue;
-
         const sku      = String(row.item           || "").trim().toUpperCase();
         const loc      = String(row.picking_location || "").trim().toUpperCase();
         const grp      = String(row.item_group      || "").trim();
@@ -1554,6 +1608,12 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         const isHigh   = levelNum >= HIGH_LEVEL_THRESHOLD;
         const enrich   = enrichMap.get(loc) || FALLBACK_ENRICH;
         const isPcArea = Boolean(enrich.is_pc);
+
+        if (pcZoneChannelFilter.has(ch)) {
+          recordPcZoneActivity({ sku, grp, loc, ord, qty, isPcArea });
+        }
+
+        if (channelFilter.size > 0 && !channelFilter.has(ch)) continue;
 
         totalPickQty  += qty;
         totalLineCount++;
@@ -1787,8 +1847,9 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
       : pcCapacityBenchmark > 0
         ? `What-if PC estimates use the median active PC max bin qty from binloc (${Math.round(pcCapacityBenchmark).toLocaleString()} units) as the assumed single PC slot capacity.`
         : "BINLOC is available, but no active PC locations with max bin quantity were found for the selected client.";
+    const pcZoneShare = (v) => pcZoneTotalPickQty > 0 ? Math.round((v / pcZoneTotalPickQty) * 10000) / 100 : 0;
 
-    const topPcSkus = [...skuMap.values()]
+    const topPcSkus = [...pcZoneSkuMap.values()]
       .filter(e => e.pc_pick_qty > 0)
       .sort((a, b) => {
         const aMetric = rank === "line_count" ? a.pc_line_count : a.pc_pick_qty;
@@ -1818,7 +1879,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
           pc_order_count: e.pc_orders.size,
           pc_location_count: e.pc_locations.size,
           pc_share_of_sku: roundPct(e.pc_pick_qty, e.pick_qty),
-          share_of_total_picks: share(e.pc_pick_qty),
+          share_of_total_picks: pcZoneShare(e.pc_pick_qty),
           current_non_pc_pick_qty: e.non_pc_pick_qty,
           low_level_non_pc_capacity: capacity.low_level_non_pc_capacity,
           low_level_non_pc_location_count: capacity.low_level_non_pc_locations.size,
@@ -1834,7 +1895,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         };
       });
 
-    const topNonPcSkus = [...skuMap.values()]
+    const topNonPcSkus = [...pcZoneSkuMap.values()]
       .filter(e => e.pc_pick_qty <= 0)
       .sort(sortRank)
       .slice(0, limit)
@@ -1848,7 +1909,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
           total_pick_qty: e.pick_qty,
           total_line_count: e.line_count,
           order_count: e.orders.size,
-          share_of_total_picks: share(e.pick_qty),
+          share_of_total_picks: pcZoneShare(e.pick_qty),
           low_level_non_pc_capacity: capacity.low_level_non_pc_capacity,
           low_level_non_pc_location_count: capacity.low_level_non_pc_locations.size,
           current_estimated_replenishments: currentReplens,
@@ -1881,6 +1942,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         date_count:      loadedDates.length,
         binloc_available: binlocAvail,
         channel_labels:  clientChannelLabels,
+        pc_zone_channels: [...pcZoneChannelFilter],
         pick_qty_source: pickQtySource,
         pick_transaction_dates_available: trxAvailableDates,
         pick_transaction_dates_loaded: pickTransactionDatesLoaded,
@@ -1923,17 +1985,18 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
       },
       pc_zone: {
         note: pcZoneNote,
+        channels: [...pcZoneChannelFilter],
         summary: {
-          pc_pick_qty: pcPickQty,
-          pc_line_count: pcLineCount,
-          pc_order_count: pcOrders.size,
-          non_pc_pick_qty: nonPcPickQty,
-          non_pc_line_count: nonPcLineCount,
-          non_pc_order_count: nonPcOrders.size,
-          pc_pick_share: roundPct(pcPickQty, totalPickQty),
-          pc_line_share: roundPct(pcLineCount, totalLineCount),
-          pc_sku_count: [...skuMap.values()].filter(e => e.pc_pick_qty > 0).length,
-          non_pc_only_sku_count: [...skuMap.values()].filter(e => e.pc_pick_qty <= 0).length,
+          pc_pick_qty: pcZonePcPickQty,
+          pc_line_count: pcZonePcLineCount,
+          pc_order_count: pcZonePcOrders.size,
+          non_pc_pick_qty: pcZoneNonPcPickQty,
+          non_pc_line_count: pcZoneNonPcLineCount,
+          non_pc_order_count: pcZoneNonPcOrders.size,
+          pc_pick_share: roundPct(pcZonePcPickQty, pcZoneTotalPickQty),
+          pc_line_share: roundPct(pcZonePcLineCount, pcZoneTotalLineCount),
+          pc_sku_count: [...pcZoneSkuMap.values()].filter(e => e.pc_pick_qty > 0).length,
+          non_pc_only_sku_count: [...pcZoneSkuMap.values()].filter(e => e.pc_pick_qty <= 0).length,
           pc_active_location_count: pcActiveLocations.size,
           pc_capacity_benchmark_units: pcCapacityBenchmark,
         },
