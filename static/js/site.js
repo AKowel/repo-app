@@ -69,5 +69,28 @@
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
-  window.RepoApp = { toast: toast };
+  var CLIENT_CHANNELS = {
+    FANDMKET: {
+      B: "Build Your Own",
+      C: "Customer Web",
+      F: "Fresh only",
+      H: "Hamper",
+      L: "Large orders",
+      N: "Store scan to carton",
+      P: "Concierge VIP Orders",
+      S: "Store replen",
+      W: "Wholesale",
+    },
+    WESTLAND: {
+      B: "Bulk Retail",
+      E: "External wooden products",
+      F: "Ferts & Chems RAW MATERIAL",
+      G: "Growing Media Raw Material",
+      L: "Large Retail",
+      R: "Retail",
+      W: "Wholesale",
+    },
+  };
+
+  window.RepoApp = { toast: toast, CLIENT_CHANNELS: CLIENT_CHANNELS };
 })();

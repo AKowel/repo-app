@@ -133,28 +133,7 @@ function syncModeUi() {
   grpRangeEnd().style.display = mode === "custom" ? "" : "none";
 }
 
-const CLIENT_CHANNELS = {
-  FANDMKET: {
-    B: "Build Your Own",
-    C: "Customer Web",
-    F: "Fresh only",
-    H: "Hamper",
-    L: "Large orders",
-    N: "Store scan to carton",
-    P: "Concierge VIP Orders",
-    S: "Store replen",
-    W: "Wholesale",
-  },
-  WESTLAND: {
-    B: "Bulk Retail",
-    E: "External wooden products",
-    F: "Ferts & Chems RAW MATERIAL",
-    G: "Growing Media Raw Material",
-    L: "Large Retail",
-    R: "Retail",
-    W: "Wholesale",
-  },
-};
+const CLIENT_CHANNELS = window.RepoApp.CLIENT_CHANNELS || {};
 
 function buildChannelPicker(client) {
   const dropdown = document.getElementById("rChannelDropdown");

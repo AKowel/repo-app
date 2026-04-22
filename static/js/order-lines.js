@@ -335,14 +335,18 @@
   }
 
   function renderExportModalBody(channels) {
+    var chMap = (window.RepoApp.CLIENT_CHANNELS || {})[selClient.value] || {};
     olExportModalBody.innerHTML = (channels.length === 0
       ? '<p style="margin:0;font-size:12px;color:var(--text-soft)">No channel data available.</p>'
       : '<p style="margin:0 0 12px;font-size:12px;color:var(--text-soft)">Select the channels to include in the export.</p>'
         + '<div style="display:flex;flex-direction:column;gap:8px">'
         + channels.map(function (ch) {
+            var desc = chMap[ch] || chMap[ch.toUpperCase()];
             return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">'
               + '<input type="checkbox" class="olExportChCb" value="' + escAttr(ch) + '" style="accent-color:var(--accent);width:13px;height:13px;cursor:pointer" checked />'
-              + '<span><strong>' + escHtml(ch) + '</strong></span>'
+              + '<span><strong>' + escHtml(ch) + '</strong>'
+              + (desc ? ' <span style="color:var(--text-soft)">— ' + escHtml(desc) + '</span>' : '')
+              + '</span>'
               + '</label>';
           }).join("")
         + '</div>'
