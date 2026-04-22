@@ -1332,6 +1332,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("rExportModalClose")?.addEventListener("click", closeExportModal);
   document.getElementById("rExportModalCancel")?.addEventListener("click", closeExportModal);
   document.getElementById("rExportModalBackdrop")?.addEventListener("click", closeExportModal);
+  document.querySelector(".rmodal")?.addEventListener("click", (e) => e.stopPropagation());
   document.getElementById("rExportModalConfirm")?.addEventListener("click", () => {
     const selected = [...document.querySelectorAll(".rExportChCb:checked")].map(cb => cb.value);
     closeExportModal();
