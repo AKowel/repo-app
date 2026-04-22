@@ -73,10 +73,10 @@ function tableHtml(cols, rows, emptyMsg) {
 
   const thead = cols.map((col) => `<th>${col.label}</th>`).join("");
   const tbody = rows.map((row) =>
-    `<tr>${cols.map((col) => `<td>${col.render ? col.render(row[col.key], row) : escHtml(row[col.key] ?? "-")}</td>`).join("")}</tr>`
+    `<tr>${cols.map((col) => `<td data-label="${escAttr(col.label)}">${col.render ? col.render(row[col.key], row) : escHtml(row[col.key] ?? "-")}</td>`).join("")}</tr>`
   ).join("");
 
-  return `<div class="table-wrap"><table class="data-table"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
+  return `<div class="table-wrap"><table class="data-table mobile-card-table"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
 }
 
 function renderTable(el, cols, rows, emptyMsg) {

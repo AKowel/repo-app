@@ -270,9 +270,9 @@
       var rowDate = r.fulfilment_date || date;
       html += "<tr data-order='" + escAttr(r.order_number) + "' data-item='" + escAttr(r.item)
             + "' data-client='" + escAttr(client) + "' data-date='" + escAttr(rowDate) + "'>";
-      html += td(r.order_number) + td(r.order_line) + td(r.item) + td(r.fulfilment_date);
-      html += td(r.qty_fulfilled) + td(r.item_group) + td(r.order_channel);
-      html += tdLong(r.customer_name) + td(r.picking_location) + td(r.pick_qty);
+      html += td("Order No", r.order_number) + td("Line", r.order_line) + td("Item", r.item) + td("Date", r.fulfilment_date);
+      html += td("Qty", r.qty_fulfilled) + td("Group", r.item_group) + td("Channel", r.order_channel);
+      html += tdLong("Customer", r.customer_name) + td("Bin", r.picking_location) + td("Pick Qty", r.pick_qty);
       html += "</tr>";
     });
     tbody.innerHTML = html;
@@ -284,8 +284,8 @@
     });
   }
 
-  function td(val)     { return "<td>" + escHtml(val == null ? "—" : val) + "</td>"; }
-  function tdLong(val) { return "<td style='max-width:220px' title='" + escAttr(val) + "'>" + escHtml(val || "—") + "</td>"; }
+  function td(label, val)     { return "<td data-label='" + escAttr(label) + "'>" + escHtml(val == null ? "—" : val) + "</td>"; }
+  function tdLong(label, val) { return "<td data-label='" + escAttr(label) + "' style='max-width:220px' title='" + escAttr(val) + "'>" + escHtml(val || "—") + "</td>"; }
 
   // ── Pagination ────────────────────────────────────────────────────────
   function goPage(n) {
@@ -470,11 +470,18 @@
 
   function renderTransactions(rows) {
     if (!rows.length) { drawerBody.innerHTML = emptyStateHtml("No transactions found."); return; }
-    var html = "<div class='table-wrap'><table class='data-table'><thead><tr>"
+    var html = "<div class='table-wrap'><table class='data-table mobile-card-table'><thead><tr>"
       + "<th>Picker</th><th>Date</th><th>Item</th><th>Bin</th><th>Qty</th><th>Order</th>"
       + "</tr></thead><tbody>";
     rows.forEach(function (r) {
-      html += "<tr>" + td(r.BTPICU) + td(r.BTPICD) + td(r.BAITEM) + td(r.BABINL) + td(r.BAQTY) + td(r.BTORDN) + "</tr>";
+      html += "<tr>"
+        + td("Picker", r.BTPICU)
+        + td("Date", r.BTPICD)
+        + td("Item", r.BAITEM)
+        + td("Bin", r.BABINL)
+        + td("Qty", r.BAQTY)
+        + td("Order", r.BTORDN)
+        + "</tr>";
     });
     html += "</tbody></table></div><p style='margin-top:12px;font-size:0.8rem;color:var(--text-soft)'>"
           + rows.length.toLocaleString() + " transaction" + (rows.length !== 1 ? "s" : "") + "</p>";
