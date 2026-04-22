@@ -21,11 +21,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="/css/tokens.css" />
-  <link rel="stylesheet" href="/css/reset.css" />
-  <link rel="stylesheet" href="/css/layout.css" />
-  <link rel="stylesheet" href="/css/components.css" />
-  <link rel="stylesheet" href="/css/heatmap.css" />
+  <link rel="stylesheet" href="/css/tokens.css?v=<%= assetVersion %>" />
+  <link rel="stylesheet" href="/css/reset.css?v=<%= assetVersion %>" />
+  <link rel="stylesheet" href="/css/layout.css?v=<%= assetVersion %>" />
+  <link rel="stylesheet" href="/css/components.css?v=<%= assetVersion %>" />
+  <link rel="stylesheet" href="/css/heatmap.css?v=<%= assetVersion %>" />
   <% if (typeof extraCss !== 'undefined') { %><link rel="stylesheet" href="<%= extraCss %>" /><% } %>
 </head>
 <body>
