@@ -207,6 +207,114 @@ function buildOrderItemLocationKey(orderNumber, item, location) {
   return `${buildOrderItemKey(orderNumber, item)}::${String(location || "").trim().toUpperCase()}`;
 }
 
+function normalizeOrderLineForReport(row, snapshotDate) {
+  const location = String(row?.picking_location || "").trim().toUpperCase();
+  const parts = parseLocationCode(location);
+  return {
+    ...row,
+    snapshot_date:     snapshotDate,
+    order_number:      String(row?.order_number || "").trim(),
+    order_line:        row?.order_line ?? "",
+    item:              String(row?.item || "").trim().toUpperCase(),
+    fulfilment_date:   String(row?.fulfilment_date || "").trim() || String(snapshotDate || "").replace(/-/g, ""),
+    qty_fulfilled:     Number(row?.qty_fulfilled || 0),
+    item_group:        String(row?.item_group || "").trim(),
+    order_channel:     String(row?.order_channel || "").trim().toUpperCase(),
+    customer_name:     String(row?.customer_name || "").trim(),
+    picking_location:  location,
+    pick_qty:          Number(row?.pick_qty || row?.qty_fulfilled || 0),
+    level:             String(row?.level || parts.level || "").trim(),
+  };
+}
+
+function mergeReportContext(target, source) {
+  if (!source) return target;
+  for (const key of ["order_line", "fulfilment_date", "item_group", "order_channel", "customer_name", "picking_location", "level"]) {
+    if ((target[key] === undefined || target[key] === null || target[key] === "") && source[key] !== undefined && source[key] !== null && source[key] !== "") {
+      target[key] = source[key];
+    }
+  }
+  if (!(Number(target.qty_fulfilled) > 0) && Number(source.qty_fulfilled) > 0) {
+    target.qty_fulfilled = Number(source.qty_fulfilled || 0);
+  }
+  return target;
+}
+
+function buildReportOrderLineContext(orderRows, snapshotDate) {
+  const byOrderItem = new Map();
+  const byOrderItemLocation = new Map();
+  const allocationRows = new Map();
+
+  for (const rawRow of (orderRows || [])) {
+    const row = normalizeOrderLineForReport(rawRow, snapshotDate);
+    if (!row.order_number || !row.item) continue;
+
+    const orderItemKey = buildOrderItemKey(row.order_number, row.item);
+    const locationKey  = buildOrderItemLocationKey(row.order_number, row.item, row.picking_location);
+
+    if (!byOrderItem.has(orderItemKey)) byOrderItem.set(orderItemKey, { ...row });
+    else mergeReportContext(byOrderItem.get(orderItemKey), row);
+
+    if (!byOrderItemLocation.has(locationKey)) byOrderItemLocation.set(locationKey, { ...row });
+    else mergeReportContext(byOrderItemLocation.get(locationKey), row);
+
+    if (!allocationRows.has(locationKey)) allocationRows.set(locationKey, { ...row });
+  }
+
+  return { byOrderItem, byOrderItemLocation, allocationRows };
+}
+
+function buildReportActivityRows(orderRows, transactionRows, snapshotDate, { useTransactions = false } = {}) {
+  const context = buildReportOrderLineContext(orderRows, snapshotDate);
+
+  if (!useTransactions) {
+    return [...context.allocationRows.values()];
+  }
+
+  const transactionMap = new Map();
+  for (const tx of (transactionRows || [])) {
+    const orderNumber = String(tx?.BTORDN || "").trim();
+    const item        = String(tx?.BAITEM || "").trim().toUpperCase();
+    const location    = String(tx?.BABINL || "").trim().toUpperCase();
+    if (!orderNumber || !item) continue;
+
+    const key = buildOrderItemLocationKey(orderNumber, item, location);
+    const entry = transactionMap.get(key) || {
+      order_number: orderNumber,
+      item,
+      picking_location: location,
+      pick_qty: 0,
+    };
+    entry.pick_qty += Number(tx?.BAQTY || 0);
+    transactionMap.set(key, entry);
+  }
+
+  const rows = [];
+  for (const entry of transactionMap.values()) {
+    const orderItemKey = buildOrderItemKey(entry.order_number, entry.item);
+    const locationKey  = buildOrderItemLocationKey(entry.order_number, entry.item, entry.picking_location);
+    const rowContext   = context.byOrderItemLocation.get(locationKey) || context.byOrderItem.get(orderItemKey) || {};
+    const parts        = parseLocationCode(entry.picking_location);
+
+    rows.push({
+      ...rowContext,
+      snapshot_date:     snapshotDate,
+      order_number:      entry.order_number,
+      item:              entry.item,
+      fulfilment_date:   rowContext.fulfilment_date || String(snapshotDate || "").replace(/-/g, ""),
+      qty_fulfilled:     Number(rowContext.qty_fulfilled || 0),
+      item_group:        String(rowContext.item_group || "").trim(),
+      order_channel:     String(rowContext.order_channel || "").trim().toUpperCase(),
+      customer_name:     String(rowContext.customer_name || "").trim(),
+      picking_location:  entry.picking_location,
+      pick_qty:          entry.pick_qty,
+      level:             String(rowContext.level || parts.level || "").trim(),
+    });
+  }
+
+  return rows;
+}
+
 const CLIENT_CHOICES = [
   { code: "FANDMKET", name: "Fortnum & Mason" },
   { code: "WESTLAND",  name: "Westland" },
@@ -881,9 +989,12 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
       service.listSnapshotDates("pick_transactions", client).then(filterCompleteSnapshotDates).catch(() => []),
       service.loadSnapshot("binloc", client, null).catch(() => ({ rows: [] })),
     ]);
+    const orderLineContextByDate = new Map(
+      loadedDates.map((d, i) => [d, buildReportOrderLineContext(orderLineResults[i]?.rows || [], d)])
+    );
 
     const matchingOrderLines = [];
-    const matchingOrderKeys  = new Set();
+    const matchingOrderLineKeys = new Set();
     const matchingOrders     = new Set();
     const matchingSkus       = new Set();
     const matchingLocations  = new Set();
@@ -915,8 +1026,15 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
           pick_qty:          Number(row.pick_qty || row.qty_fulfilled || 0),
         };
 
+        const matchingLineKey = buildOrderItemLocationKey(
+          normalizedRow.order_number,
+          normalizedRow.item,
+          normalizedRow.picking_location
+        );
+        if (matchingOrderLineKeys.has(matchingLineKey)) continue;
+        matchingOrderLineKeys.add(matchingLineKey);
+
         matchingOrderLines.push(normalizedRow);
-        matchingOrderKeys.add(buildOrderItemKey(normalizedRow.order_number, normalizedRow.item));
         matchingOrders.add(normalizedRow.order_number);
         if (normalizedRow.item) matchingSkus.add(normalizedRow.item);
         if (normalizedRow.picking_location) matchingLocations.add(normalizedRow.picking_location);
@@ -940,10 +1058,18 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
         const sku         = String(row.BAITEM || "").trim().toUpperCase();
         const location    = String(row.BABINL || "").trim().toUpperCase();
         const orderItemKey = buildOrderItemKey(orderNumber, sku);
+        const dateContext = orderLineContextByDate.get(snapshotDate) || {};
+        const reportContext =
+          dateContext.byOrderItemLocation?.get(buildOrderItemLocationKey(orderNumber, sku, location)) ||
+          dateContext.byOrderItem?.get(orderItemKey) ||
+          {};
+        const txChannel = String(reportContext.order_channel || "").trim().toUpperCase();
+
+        if (channelFilter.size > 0 && !channelFilter.has(txChannel)) continue;
 
         const matchesTarget = targetEntity === "location"
-          ? location === targetValue && matchingOrderKeys.has(orderItemKey)
-          : sku === targetValue && matchingOrders.has(orderNumber);
+          ? location === targetValue
+          : sku === targetValue;
 
         if (!matchesTarget) continue;
 
@@ -956,7 +1082,18 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
           BTPICU: String(row.BTPICU || "").trim(),
           BTPICD: String(row.BTPICD || "").trim(),
           BAQTY:  Number(row.BAQTY || 0),
+          order_channel: txChannel,
+          item_group: String(reportContext.item_group || "").trim(),
+          customer_name: String(reportContext.customer_name || "").trim(),
+          order_line: reportContext.order_line ?? "",
         });
+
+        if (orderNumber) matchingOrders.add(orderNumber);
+        if (sku) matchingSkus.add(sku);
+        if (location) matchingLocations.add(location);
+        if (txChannel) matchingChannels.add(txChannel);
+        if (reportContext.item_group) matchingGroups.add(String(reportContext.item_group).trim());
+        if (reportContext.customer_name) matchingCustomers.add(String(reportContext.customer_name).trim());
       }
     }
 
@@ -991,6 +1128,7 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
 
       matchingOrderLines[i] = {
         ...row,
+        pick_qty: exactEntry ? exactEntry.transaction_qty : row.pick_qty,
         pickers: selectedEntry ? [...selectedEntry.pickers].sort((a, b) => a.localeCompare(b)).join(", ") : "",
         transaction_count: (selectedEntry?.transaction_count ?? 0),
         transaction_qty: (selectedEntry?.transaction_qty ?? 0),
@@ -1039,17 +1177,19 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
     const locationBreakdownMap = new Map();
     const skuBreakdownMap = new Map();
     if (targetEntity === "sku") {
-      for (const row of matchingOrderLines) {
-        const loc = row.picking_location;
+      const sourceRows = matchingTransactions.length ? matchingTransactions : matchingOrderLines;
+      for (const row of sourceRows) {
+        const loc = matchingTransactions.length ? row.BABINL : row.picking_location;
         const entry = locationBreakdownMap.get(loc) || { location: loc, pick_qty: 0, line_count: 0, orders: new Set() };
-        entry.pick_qty += Number(row.pick_qty || 0);
+        entry.pick_qty += Number(matchingTransactions.length ? row.BAQTY : row.pick_qty || 0);
         entry.line_count += 1;
-        if (row.order_number) entry.orders.add(row.order_number);
+        if (row.BTORDN || row.order_number) entry.orders.add(row.BTORDN || row.order_number);
         locationBreakdownMap.set(loc, entry);
       }
     } else {
-      for (const row of matchingOrderLines) {
-        const sku = row.item;
+      const sourceRows = matchingTransactions.length ? matchingTransactions : matchingOrderLines;
+      for (const row of sourceRows) {
+        const sku = matchingTransactions.length ? row.BAITEM : row.item;
         const entry = skuBreakdownMap.get(sku) || {
           sku,
           item_group: row.item_group || "",
@@ -1058,9 +1198,10 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
           orders: new Set(),
           customers: new Set(),
         };
-        entry.pick_qty += Number(row.pick_qty || 0);
+        if (!entry.item_group && row.item_group) entry.item_group = row.item_group;
+        entry.pick_qty += Number(matchingTransactions.length ? row.BAQTY : row.pick_qty || 0);
         entry.line_count += 1;
-        if (row.order_number) entry.orders.add(row.order_number);
+        if (row.BTORDN || row.order_number) entry.orders.add(row.BTORDN || row.order_number);
         if (row.customer_name) entry.customers.add(row.customer_name);
         skuBreakdownMap.set(sku, entry);
       }
@@ -1088,7 +1229,9 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
       .sort((a, b) => b.pick_qty - a.pick_qty || b.line_count - a.line_count || a.sku.localeCompare(b.sku))
       .slice(0, 25);
 
-    const totalPickQty = matchingOrderLines.reduce((sum, row) => sum + Number(row.pick_qty || 0), 0);
+    const totalPickQty = matchingTransactions.length
+      ? matchingTransactions.reduce((sum, row) => sum + Number(row.BAQTY || 0), 0)
+      : matchingOrderLines.reduce((sum, row) => sum + Number(row.pick_qty || 0), 0);
     const transactionCount = matchingTransactions.length;
 
     const summary = targetEntity === "location"
@@ -1228,10 +1371,42 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
     }
 
     // ── Step 2: Load in parallel ──────────────────────────────────────────
-    const [orderLineResults, binlocResult] = await Promise.all([
+    const trxAvailableDatesPromise = service.listSnapshotDates("pick_transactions", client)
+      .then(filterCompleteSnapshotDates)
+      .catch(() => []);
+
+    const trxAvailableDates = await trxAvailableDatesPromise;
+
+    const [orderLineResults, pickTransactionResults, binlocResult] = await Promise.all([
       Promise.all(loadedDates.map(d => service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] })))),
+      Promise.all(loadedDates.map(d =>
+        trxAvailableDates.includes(d)
+          ? service.loadSnapshot("pick_transactions", client, d).catch(() => ({ rows: [] }))
+          : Promise.resolve({ rows: [] })
+      )),
       service.loadSnapshot("binloc", client, null).catch(() => ({ rows: [] })),
     ]);
+
+    const activityResults = loadedDates.map((d, i) => {
+      const useTransactions = trxAvailableDates.includes(d);
+      return {
+        rows: buildReportActivityRows(
+          orderLineResults[i]?.rows || [],
+          pickTransactionResults[i]?.rows || [],
+          d,
+          { useTransactions }
+        ),
+        using_transactions: useTransactions,
+      };
+    });
+
+    const pickTransactionDatesLoaded = loadedDates.filter((d, i) =>
+      trxAvailableDates.includes(d) && (pickTransactionResults[i]?.rows || []).length > 0
+    );
+    const pickTransactionDatesMissing = loadedDates.filter(d => !trxAvailableDates.includes(d));
+    const pickQtySource = pickTransactionDatesMissing.length
+      ? (pickTransactionDatesLoaded.length ? "mixed" : "order_lines_fallback")
+      : "pick_transactions";
 
     const rawBinlocRows  = binlocResult.rows || [];
     const binlocAvail    = rawBinlocRows.length > 0;
@@ -1240,7 +1415,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
     // ── Step 3: Location enrichment map + SKU capacity model ──────────────
     const FALLBACK_ENRICH = { bin_size: "—", operating_area: "—", max_bin_qty: 0, bin_type: "Unknown", is_pc: false };
     const pickedLocations = new Set();
-    for (const snapshot of orderLineResults) {
+    for (const snapshot of activityResults) {
       for (const row of (snapshot?.rows || [])) {
         const loc = String(row.picking_location || "").trim().toUpperCase();
         if (loc) pickedLocations.add(loc);
@@ -1352,7 +1527,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
 
     for (let di = 0; di < loadedDates.length; di++) {
       const snapDate = loadedDates[di];
-      const rows     = orderLineResults[di]?.rows || [];
+      const rows     = activityResults[di]?.rows || [];
 
       for (const row of rows) {
         const ch = String(row.order_channel || "").trim().toUpperCase();
@@ -1693,6 +1868,10 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         date_count:      loadedDates.length,
         binloc_available: binlocAvail,
         channel_labels:  clientChannelLabels,
+        pick_qty_source: pickQtySource,
+        pick_transaction_dates_available: trxAvailableDates,
+        pick_transaction_dates_loaded: pickTransactionDatesLoaded,
+        pick_transaction_dates_missing: pickTransactionDatesMissing,
       },
       summary: {
         total_pick_qty:         totalPickQty,
