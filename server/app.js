@@ -244,10 +244,12 @@ function buildReportOrderLineContext(orderRows, snapshotDate) {
   const byOrderItem = new Map();
   const byOrderItemLocation = new Map();
   const allocationRows = new Map();
+  const itemGroupBySku = new Map();
 
   for (const rawRow of (orderRows || [])) {
     const row = normalizeOrderLineForReport(rawRow, snapshotDate);
     if (!row.order_number || !row.item) continue;
+    if (row.item_group && !itemGroupBySku.has(row.item)) itemGroupBySku.set(row.item, row.item_group);
 
     const orderItemKey = buildOrderItemKey(row.order_number, row.item);
     const locationKey  = buildOrderItemLocationKey(row.order_number, row.item, row.picking_location);
@@ -261,7 +263,7 @@ function buildReportOrderLineContext(orderRows, snapshotDate) {
     if (!allocationRows.has(locationKey)) allocationRows.set(locationKey, { ...row });
   }
 
-  return { byOrderItem, byOrderItemLocation, allocationRows };
+  return { byOrderItem, byOrderItemLocation, allocationRows, itemGroupBySku };
 }
 
 function buildReportActivityRows(orderRows, transactionRows, snapshotDate, { useTransactions = false } = {}) {
@@ -295,6 +297,7 @@ function buildReportActivityRows(orderRows, transactionRows, snapshotDate, { use
     const locationKey  = buildOrderItemLocationKey(entry.order_number, entry.item, entry.picking_location);
     const rowContext   = context.byOrderItemLocation.get(locationKey) || context.byOrderItem.get(orderItemKey) || {};
     const parts        = parseLocationCode(entry.picking_location);
+    const itemGroup    = String(rowContext.item_group || context.itemGroupBySku.get(entry.item) || "").trim();
 
     rows.push({
       ...rowContext,
@@ -303,7 +306,7 @@ function buildReportActivityRows(orderRows, transactionRows, snapshotDate, { use
       item:              entry.item,
       fulfilment_date:   rowContext.fulfilment_date || String(snapshotDate || "").replace(/-/g, ""),
       qty_fulfilled:     Number(rowContext.qty_fulfilled || 0),
-      item_group:        String(rowContext.item_group || "").trim(),
+      item_group:        itemGroup,
       order_channel:     String(rowContext.order_channel || "").trim().toUpperCase(),
       customer_name:     String(rowContext.customer_name || "").trim(),
       picking_location:  entry.picking_location,
@@ -937,11 +940,12 @@ app.get("/api/pick-transactions", requireAdminApi, async (req, res) => {
 
 // ── API: reports detail drawer ────────────────────────────────────────────
 app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
-  const { client, entity, value, mode, date, start, end, channels } = req.query;
+  const { client, entity, value, mode, date, start, end, channels, hide_group_147, hideGroup147: hideGroup147Camel } = req.query;
   const targetEntity = entity === "location" ? "location" : (entity === "sku" ? "sku" : "");
   const targetValue  = targetEntity === "location"
     ? String(value || "").trim().toUpperCase()
     : String(value || "").trim().toUpperCase();
+  const hideGroup147 = hide_group_147 === "1" || hideGroup147Camel === "1";
 
   if (!client || !targetEntity || !targetValue) {
     return res.status(400).json({ ok: false, error: "client, entity and value params required." });
@@ -1025,6 +1029,7 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
           customer_name:     String(row.customer_name || "").trim(),
           pick_qty:          Number(row.pick_qty || row.qty_fulfilled || 0),
         };
+        if (hideGroup147 && normalizedRow.item_group === "147") continue;
 
         const matchingLineKey = buildOrderItemLocationKey(
           normalizedRow.order_number,
@@ -1064,8 +1069,10 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
           dateContext.byOrderItem?.get(orderItemKey) ||
           {};
         const txChannel = String(reportContext.order_channel || "").trim().toUpperCase();
+        const txItemGroup = String(reportContext.item_group || dateContext.itemGroupBySku?.get(sku) || "").trim();
 
         if (channelFilter.size > 0 && !channelFilter.has(txChannel)) continue;
+        if (hideGroup147 && txItemGroup === "147") continue;
 
         const matchesTarget = targetEntity === "location"
           ? location === targetValue
@@ -1083,7 +1090,7 @@ app.get("/api/reports-detail", requireAdminApi, async (req, res) => {
           BTPICD: String(row.BTPICD || "").trim(),
           BAQTY:  Number(row.BAQTY || 0),
           order_channel: txChannel,
-          item_group: String(reportContext.item_group || "").trim(),
+          item_group: txItemGroup,
           customer_name: String(reportContext.customer_name || "").trim(),
           order_line: reportContext.order_line ?? "",
         });
@@ -1317,9 +1324,10 @@ app.get("/reports", requireAdminPage, (req, res) => {
 
 // ── API: reports data ─────────────────────────────────────────────────────
 app.get("/api/reports-data", requireAdminApi, async (req, res) => {
-  const { client, mode, date, start, end, channels, rankBy } = req.query;
+  const { client, mode, date, start, end, channels, rankBy, hide_group_147, hideGroup147: hideGroup147Camel } = req.query;
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 10), 100);
   const rank  = (rankBy === "line_count") ? "line_count" : "pick_qty";
+  const hideGroup147 = hide_group_147 === "1" || hideGroup147Camel === "1";
 
   if (!client) return res.status(400).json({ ok: false, error: "client param required." });
 
@@ -1334,6 +1342,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
       return res.json({
         ok: true,
         meta: { client_code: client, mode: mode || "latest", rank_by: rank, limit,
+                hide_group_147: hideGroup147,
                 available_dates: availableDates, loaded_dates: [], missing_dates: [],
                 latest_date: latestDate, date_count: 0, binloc_available: false,
                 channel_labels: CHANNEL_LABELS[client] || CHANNEL_LABELS.FANDMKET || {} },
@@ -1538,6 +1547,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         const grp      = String(row.item_group      || "").trim();
         const ord      = String(row.order_number    || "").trim();
         const qty      = Number(row.pick_qty        || row.qty_fulfilled || 0);
+        if (hideGroup147 && grp === "147") continue;
         const parts    = parseLocationCode(loc);
         const pfx      = parts.aisle_prefix;
         const levelNum = parseInt(parts.level, 10) || 0;
@@ -1767,7 +1777,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
       .filter(e => e.high_level_pick_qty > 0)
       .sort((a, b) => b.high_level_pick_qty - a.high_level_pick_qty)
       .slice(0, 50)
-      .map(e => ({ sku: e.sku, high_level_pick_qty: e.high_level_pick_qty,
+      .map(e => ({ sku: e.sku, item_group: e.item_group, high_level_pick_qty: e.high_level_pick_qty,
                    total_pick_qty: e.pick_qty,
                    high_level_share: e.pick_qty > 0 ? Math.round((e.high_level_pick_qty / e.pick_qty) * 10000) / 100 : 0 }));
 
@@ -1799,6 +1809,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         );
         return {
           sku: e.sku,
+          item_group: e.item_group,
           total_pick_qty: e.pick_qty,
           total_line_count: e.line_count,
           order_count: e.orders.size,
@@ -1833,6 +1844,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         const pcReplens = safeCeilDiv(e.pick_qty, pcCapacityBenchmark);
         return {
           sku: e.sku,
+          item_group: e.item_group,
           total_pick_qty: e.pick_qty,
           total_line_count: e.line_count,
           order_count: e.orders.size,
@@ -1860,6 +1872,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         client_code:     client,
         mode:            mode || "latest",
         rank_by:         rank,
+        hide_group_147:  hideGroup147,
         limit,
         available_dates: availableDates,
         loaded_dates:    loadedDates,

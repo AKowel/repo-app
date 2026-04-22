@@ -194,6 +194,7 @@ function buildQuery() {
 
   const channels = getSelectedChannels();
   if (channels.length) params.set("channels", channels.join(","));
+  if (hideGrp147()) params.set("hide_group_147", "1");
   return params;
 }
 
@@ -292,6 +293,7 @@ function hideGrp147() {
 function renderTopSkus(topSkus, limit, highLevelSkus) {
   const el = document.getElementById("rTab-skus");
   if (hideGrp147()) topSkus = topSkus.filter(r => String(r.item_group) !== "147");
+  if (hideGrp147()) highLevelSkus = (highLevelSkus || []).filter(r => String(r.item_group) !== "147");
   let html = `<div class="reports-section"><div class="reports-section__title">Top ${limit} SKUs${hideGrp147() ? ' <span style="font-size:10px;font-weight:400;color:var(--text-soft)">(group 147 hidden)</span>' : ''}</div></div>`;
 
   const cols = [
@@ -498,6 +500,13 @@ function renderPcZone(pcZone, meta) {
   const summary = pcZone?.summary || {};
   const note = pcZone?.note || "";
   const pcPct = Math.min(Math.max(Number(summary.pc_pick_share || 0), 0), 100);
+  const grpNote = hideGrp147() ? ' <span style="font-size:10px;font-weight:400;color:var(--text-soft)">(group 147 hidden)</span>' : "";
+  const topPcSkus = hideGrp147()
+    ? (pcZone?.top_pc_skus || []).filter(r => String(r.item_group) !== "147")
+    : (pcZone?.top_pc_skus || []);
+  const topNonPcSkus = hideGrp147()
+    ? (pcZone?.top_non_pc_skus || []).filter(r => String(r.item_group) !== "147")
+    : (pcZone?.top_non_pc_skus || []);
 
   let html = '<div class="reports-section"><div class="reports-section__title">PC Zone Mix</div></div>';
 
@@ -554,9 +563,10 @@ function renderPcZone(pcZone, meta) {
         </div>
       </div>
     </div>
-    <div class="reports-section"><div class="reports-section__title">Top SKUs Currently Picked From PC</div></div>
+    <div class="reports-section"><div class="reports-section__title">Top SKUs Currently Picked From PC${grpNote}</div></div>
     ${tableHtml([
       { key: "sku", label: "SKU", render: (value) => renderDetailLink("sku", value, value) },
+      { key: "item_group", label: "Group", render: (value) => escHtml(value || "-") },
       { key: "pc_pick_qty", label: "PC Qty", render: (value) => fmt(value) },
       { key: "total_pick_qty", label: "Total Qty", render: (value) => fmt(value) },
       { key: "pc_share_of_sku", label: "PC Share", render: (value) => `${value}%` },
@@ -565,10 +575,11 @@ function renderPcZone(pcZone, meta) {
       { key: "low_level_non_pc_capacity", label: "Non-PC Cap <20", render: (value) => fmtMaybe(value) },
       { key: "extra_replenishments_if_pc_removed", label: "Extra Replens No PC", render: (value) => fmtMaybe(value) },
       { key: "total_replenishments_without_pc", label: "Total Replens No PC", render: (value) => fmtMaybe(value) },
-    ], pcZone?.top_pc_skus || [], "No picks were taken from PC locations for the current filters.")}
-    <div class="reports-section"><div class="reports-section__title">Top SKUs Not Currently Picked From PC</div></div>
+    ], topPcSkus, "No picks were taken from PC locations for the current filters.")}
+    <div class="reports-section"><div class="reports-section__title">Top SKUs Not Currently Picked From PC${grpNote}</div></div>
     ${tableHtml([
       { key: "sku", label: "SKU", render: (value) => renderDetailLink("sku", value, value) },
+      { key: "item_group", label: "Group", render: (value) => escHtml(value || "-") },
       { key: "total_pick_qty", label: "Total Qty", render: (value) => fmt(value) },
       { key: "order_count", label: "Orders", render: (value) => fmt(value) },
       { key: "share_of_total_picks", label: "Share", render: (value) => renderShareBar(value) },
@@ -576,7 +587,7 @@ function renderPcZone(pcZone, meta) {
       { key: "current_estimated_replenishments", label: "Current Replens", render: (value) => fmtMaybe(value) },
       { key: "estimated_replenishments_in_pc", label: "Est. Replens In PC", render: (value) => fmtMaybe(value) },
       { key: "estimated_replenishments_delta", label: "PC Impact", render: (value) => renderReplenishmentDelta(value) },
-    ], pcZone?.top_non_pc_skus || [], meta?.binloc_available ? "No high-volume non-PC SKUs were found for the current filters." : "BINLOC data is required to estimate PC candidates.")}
+    ], topNonPcSkus, meta?.binloc_available ? "No high-volume non-PC SKUs were found for the current filters." : "BINLOC data is required to estimate PC candidates.")}
   `;
 
   el.innerHTML = html;
@@ -1032,7 +1043,9 @@ function exportToExcel(selectedChannels) {
   ), "Top SKUs");
 
   // High-Level SKUs
-  if ((_data.high_level_skus || []).length) {
+  let highLevelExportSkus = _data.high_level_skus || [];
+  if (hideGrp147()) highLevelExportSkus = highLevelExportSkus.filter(r => String(r.item_group) !== "147");
+  if (highLevelExportSkus.length) {
     XLSX.utils.book_append_sheet(wb, makeSheet(
       "High-Level SKUs — Pick Analysis",
       "SKUs that had at least one pick from a location at level 20 or above (upper-rack / elevated picking). " +
@@ -1045,7 +1058,7 @@ function exportToExcel(selectedChannels) {
         { key: "total_pick_qty", label: "Total Qty" },
         { key: "high_level_share", label: "HL Share %" },
       ],
-      _data.high_level_skus
+      highLevelExportSkus
     ), "High-Level SKUs");
   }
 
@@ -1318,10 +1331,7 @@ document.addEventListener("DOMContentLoaded", () => {
     exportToExcel(selected);
   });
   document.getElementById("rHideGrp147")?.addEventListener("change", () => {
-    if (_data) {
-      renderTopSkus(_data.top_skus, _data.meta.limit, _data.high_level_skus);
-      renderLocations(_data.top_locations);
-    }
+    loadReports();
   });
   document.getElementById("rTabs").addEventListener("click", (e) => {
     const btn = closestFromEvent(e, ".reports-tab-btn");
