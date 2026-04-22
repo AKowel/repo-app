@@ -509,12 +509,14 @@ function renderReplenishment(replenishment) {
 function renderPcZone(pcZone, meta) {
   const el = document.getElementById("rTab-pc-zone");
   const summary = pcZone?.summary || {};
+  const availability = pcZone?.availability || {};
   const note = pcZone?.note || "";
   const pcPct = Math.min(Math.max(Number(summary.pc_pick_share || 0), 0), 100);
   const grpNote = hideGrp147() ? ' <span style="font-size:10px;font-weight:400;color:var(--text-soft)">(group 147 hidden)</span>' : "";
   const topPcSkus = hideGrp147()
     ? (pcZone?.top_pc_skus || []).filter(r => String(r.item_group) !== "147")
     : (pcZone?.top_pc_skus || []);
+  const lowLevelTopPcSkus = topPcSkus.filter(r => Number(r.low_level_pc_pick_qty || 0) > 0);
   const topNonPcSkus = hideGrp147()
     ? (pcZone?.top_non_pc_skus || []).filter(r => String(r.item_group) !== "147")
     : (pcZone?.top_non_pc_skus || []);
@@ -576,22 +578,34 @@ function renderPcZone(pcZone, meta) {
           <div class="reports-metric-card__sub">${fmt(summary.non_pc_only_sku_count)} active SKUs stayed outside PC</div>
         </div>
         <div class="reports-metric-card">
-          <div class="reports-metric-card__label">Active PC Faces</div>
-          <div class="reports-metric-card__value">${fmt(summary.pc_active_location_count)}</div>
-          <div class="reports-metric-card__sub">Low-level PC locations seen in BINLOC</div>
+          <div class="reports-metric-card__label">Empty PC Faces</div>
+          <div class="reports-metric-card__value">${fmt(summary.pc_low_level_empty_location_count)}</div>
+          <div class="reports-metric-card__sub">${fmt(summary.pc_low_level_occupied_location_count)} occupied below level 20</div>
         </div>
         <div class="reports-metric-card">
-          <div class="reports-metric-card__label">Median PC Capacity</div>
-          <div class="reports-metric-card__value">${fmtMaybe(summary.pc_capacity_benchmark_units)}</div>
-          <div class="reports-metric-card__sub">Assumed single PC slot max bin qty</div>
+          <div class="reports-metric-card__label">Empty Bin Types</div>
+          <div class="reports-metric-card__value">${fmt(summary.pc_empty_bin_size_count)}</div>
+          <div class="reports-metric-card__sub">${fmt(summary.item_dimension_sku_count)} SKUs with item dimensions</div>
         </div>
       </div>
     </div>
-    <div class="reports-section"><div class="reports-section__title">Top SKUs Currently Picked From PC${grpNote}</div></div>
+    <div class="reports-section"><div class="reports-section__title">Empty Peak Capacity Locations Below Level 20</div></div>
+    ${tableHtml([
+      { key: "bin_size", label: "Bin Size" },
+      { key: "location_count", label: "Empty Locations", render: (value) => fmt(value) },
+      { key: "bin_type", label: "Bin Type" },
+      { key: "height_mm", label: "H mm", render: (value) => fmtMaybe(value) },
+      { key: "width_mm", label: "W mm", render: (value) => fmtMaybe(value) },
+      { key: "depth_mm", label: "D mm", render: (value) => fmtMaybe(value) },
+      { key: "usable_volume_mm3", label: "Usable 80%", render: (value) => fmtMaybe(value) },
+      { key: "example_locations", label: "Examples", render: (value) => escHtml((value || []).join(", ") || "-") },
+    ], availability.bin_sizes || [], "No empty low-level PC locations were found in BINLOC.")}
+    <div class="reports-section"><div class="reports-section__title">Top SKUs Currently Picked From PC Below Level 20${grpNote}</div></div>
     ${tableHtml([
       { key: "sku", label: "SKU", render: (value) => renderDetailLink("sku", value, value) },
       { key: "item_group", label: "Group", render: (value) => escHtml(value || "-") },
-      { key: "pc_pick_qty", label: "PC Qty", render: (value) => fmt(value) },
+      { key: "low_level_pc_pick_qty", label: "PC Qty <20", render: (value) => fmt(value) },
+      { key: "low_level_pc_line_count", label: "PC Lines <20", render: (value) => fmt(value) },
       { key: "total_pick_qty", label: "Total Qty", render: (value) => fmt(value) },
       { key: "pc_share_of_sku", label: "PC Share", render: (value) => `${value}%` },
       { key: "pc_order_count", label: "PC Orders", render: (value) => fmt(value) },
@@ -599,19 +613,24 @@ function renderPcZone(pcZone, meta) {
       { key: "low_level_non_pc_capacity", label: "Non-PC Cap <20", render: (value) => fmtMaybe(value) },
       { key: "extra_replenishments_if_pc_removed", label: "Extra Replens No PC", render: (value) => fmtMaybe(value) },
       { key: "total_replenishments_without_pc", label: "Total Replens No PC", render: (value) => fmtMaybe(value) },
-    ], topPcSkus, "No picks were taken from PC locations for the current filters.")}
-    <div class="reports-section"><div class="reports-section__title">Top SKUs Not Currently Picked From PC${grpNote}</div></div>
+    ], lowLevelTopPcSkus, "No picks were taken from low-level PC locations for the current filters.")}
+    <div class="reports-section"><div class="reports-section__title">Peak Capacity Move Recommendations${grpNote}</div></div>
     ${tableHtml([
       { key: "sku", label: "SKU", render: (value) => renderDetailLink("sku", value, value) },
       { key: "item_group", label: "Group", render: (value) => escHtml(value || "-") },
-      { key: "total_pick_qty", label: "Total Qty", render: (value) => fmt(value) },
-      { key: "order_count", label: "Orders", render: (value) => fmt(value) },
+      { key: "low_level_non_pc_pick_qty", label: "Floor Qty <20", render: (value) => fmt(value) },
+      { key: "low_level_non_pc_line_count", label: "Floor Lines <20", render: (value) => fmt(value) },
       { key: "share_of_total_picks", label: "Share", render: (value) => renderShareBar(value) },
       { key: "low_level_non_pc_capacity", label: "Current Cap <20", render: (value) => fmtMaybe(value) },
+      { key: "current_bin_sizes", label: "Current Bins", render: (value) => escHtml(value || "-") },
       { key: "current_estimated_replenishments", label: "Current Replens", render: (value) => fmtMaybe(value) },
+      { key: "recommended_bin_size", label: "Best PC Bin", render: (value) => escHtml(value || "-") },
+      { key: "recommended_pc_capacity", label: "Est. PC Cap", render: (value) => fmtMaybe(value) },
+      { key: "recommended_empty_locations", label: "Empty Bins", render: (value) => fmtMaybe(value) },
       { key: "estimated_replenishments_in_pc", label: "Est. Replens In PC", render: (value) => fmtMaybe(value) },
       { key: "estimated_replenishments_delta", label: "PC Impact", render: (value) => renderReplenishmentDelta(value) },
-    ], topNonPcSkus, meta?.binloc_available ? "No high-volume non-PC SKUs were found for the current filters." : "BINLOC data is required to estimate PC candidates.")}
+      { key: "capacity_source", label: "Capacity Source", render: (value) => value === "item_dimensions" ? "Item dims" : (value === "current_bin_density" ? "Current bin density" : "-") },
+    ], topNonPcSkus, meta?.binloc_available ? "No low-level non-PC SKU picks could be scored against empty PC bins." : "BINLOC data is required to estimate PC candidates.")}
   `;
 
   el.innerHTML = html;

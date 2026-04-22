@@ -88,6 +88,16 @@ function normalizeBinSizeDimensions(value) {
   return { height, width, depth };
 }
 
+function binSizeVolume(dimensions) {
+  const dims = normalizeBinSizeDimensions(dimensions);
+  return dims ? dims.height * dims.width * dims.depth : 0;
+}
+
+function usableBinVolume(dimensions) {
+  const volume = binSizeVolume(dimensions);
+  return volume > 0 ? Math.round(volume * 0.8) : 0;
+}
+
 function getConfiguredBinSizes() {
   const merged = { ...DEFAULT_BIN_SIZES, ...(LAYOUT_OVERRIDES?.bin_sizes || {}) };
   const out = {};
@@ -117,6 +127,25 @@ function saveConfiguredBinSize(code, dimensions) {
   fs.writeFileSync(LAYOUT_OVERRIDES_PATH, JSON.stringify(nextOverrides, null, 2), "utf8");
   LAYOUT_OVERRIDES = nextOverrides;
   return dims;
+}
+
+function getCatalogItemDimensions(row) {
+  const dims = normalizeBinSizeDimensions({
+    height: row?.ITDHGT ?? row?.itdhgt ?? row?.height ?? row?.height_mm ?? row?.item_height_mm,
+    width:  row?.ITDWTH ?? row?.itdwth ?? row?.width  ?? row?.width_mm  ?? row?.item_width_mm,
+    depth:  row?.ITDDTH ?? row?.itddth ?? row?.depth  ?? row?.depth_mm  ?? row?.item_depth_mm,
+  });
+  return dims;
+}
+
+function buildCatalogDimensionMap(snapshot) {
+  const map = new Map();
+  for (const row of (snapshot?.items || [])) {
+    const sku = String(row?.sku || row?.ITITEM || row?.ititem || "").trim().toUpperCase();
+    const dims = getCatalogItemDimensions(row);
+    if (sku && dims) map.set(sku, dims);
+  }
+  return map;
 }
 
 function getBinlocLocation(row) {
@@ -1432,15 +1461,31 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
             pc_pick_qty: 0,
             pc_line_count: 0,
             pc_order_count: 0,
+            low_level_pc_pick_qty: 0,
+            low_level_pc_line_count: 0,
             non_pc_pick_qty: 0,
             non_pc_line_count: 0,
             non_pc_order_count: 0,
+            low_level_non_pc_pick_qty: 0,
+            low_level_non_pc_line_count: 0,
             pc_pick_share: 0,
             pc_line_share: 0,
             pc_sku_count: 0,
             non_pc_only_sku_count: 0,
             pc_active_location_count: 0,
+            pc_low_level_location_count: 0,
+            pc_low_level_empty_location_count: 0,
+            pc_low_level_occupied_location_count: 0,
+            pc_empty_bin_size_count: 0,
             pc_capacity_benchmark_units: 0,
+            item_dimension_sku_count: 0,
+          },
+          availability: {
+            empty_location_count: 0,
+            occupied_location_count: 0,
+            total_low_level_location_count: 0,
+            bin_sizes: [],
+            sample_locations: [],
           },
           top_pc_skus: [],
           top_non_pc_skus: [],
@@ -1455,7 +1500,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
 
     const trxAvailableDates = await trxAvailableDatesPromise;
 
-    const [orderLineResults, pickTransactionResults, binlocResult] = await Promise.all([
+    const [orderLineResults, pickTransactionResults, binlocResult, catalogResult] = await Promise.all([
       Promise.all(loadedDates.map(d => service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] })))),
       Promise.all(loadedDates.map(d =>
         trxAvailableDates.includes(d)
@@ -1463,6 +1508,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
           : Promise.resolve({ rows: [] })
       )),
       service.loadSnapshot("binloc", client, null).catch(() => ({ rows: [] })),
+      service.loadCatalogSnapshot(client).catch(() => ({ snapshot: null, meta: null })),
     ]);
 
     const activityResults = loadedDates.map((d, i) => {
@@ -1489,6 +1535,8 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
     const rawBinlocRows  = binlocResult.rows || [];
     const binlocAvail    = rawBinlocRows.length > 0;
     const targetClient   = normalizeClientCode(client);
+    const configuredBinSizes = getConfiguredBinSizes();
+    const itemDimensionMap = buildCatalogDimensionMap(catalogResult?.snapshot);
 
     // ── Step 3: Location enrichment map + SKU capacity model ──────────────
     const FALLBACK_ENRICH = { bin_size: "—", operating_area: "—", max_bin_qty: 0, bin_type: "Unknown", is_pc: false };
@@ -1504,6 +1552,11 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
     const skuCapacityMap = new Map();
     const pcCapacityValues = [];
     const pcActiveLocations = new Set();
+    const emptyPcBinSizeMap = new Map();
+    const emptyPcLocations = [];
+    let pcLowLevelLocationCount = 0;
+    let pcLowLevelEmptyLocationCount = 0;
+    let pcLowLevelOccupiedLocationCount = 0;
 
     for (const row of rawBinlocRows) {
       const loc = getBinlocLocation(row);
@@ -1519,6 +1572,15 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
       const isPcArea      = isPcOperatingArea(operatingArea);
       const status        = String(row.BLSTS || row.status || "Y").trim().toUpperCase();
       const levelNum      = getLocationLevelNumber(loc);
+      const binSize       = getBinlocBinSize(row);
+      const binDims       = configuredBinSizes[binSize] || null;
+      const binUsableVolume = usableBinVolume(binDims);
+      const currentQty    = Number(row.BLQTY || row.qty || row["Item Qty"] || 0);
+      const adjustedQty   = Number(row.BLADJQ || row.item_adjust || 0);
+      const pickedQty     = Number(row.BLPICQ || row.item_picked || 0);
+      const kitQty        = Number(row.BLKITQ || 0);
+      const sku           = String(row.BLITEM || row.sku || "").trim().toUpperCase();
+      const isEmptyLocation = currentQty <= 0 && adjustedQty <= 0 && pickedQty <= 0 && kitQty <= 0;
       const enrichRecord  = {
         bin_size:       String(row.BLSCOD || row.bin_size || "").trim().toUpperCase() || "—",
         operating_area: operatingArea || "—",
@@ -1534,20 +1596,61 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
       }
 
       if (status !== "Y") continue;
+      if (isPcArea && levelNum < HIGH_LEVEL_THRESHOLD) {
+        pcLowLevelLocationCount++;
+        if (isEmptyLocation) {
+          pcLowLevelEmptyLocationCount++;
+          const key = binSize || "â€”";
+          const entry = emptyPcBinSizeMap.get(key) || {
+            bin_size: key,
+            bin_type: binType,
+            location_count: 0,
+            dimensions_configured: Boolean(binDims),
+            height_mm: binDims ? binDims.height : null,
+            width_mm: binDims ? binDims.width : null,
+            depth_mm: binDims ? binDims.depth : null,
+            volume_mm3: binDims ? binSizeVolume(binDims) : null,
+            usable_volume_mm3: binUsableVolume || null,
+            example_locations: [],
+          };
+          entry.location_count++;
+          if (entry.example_locations.length < 8) entry.example_locations.push(loc);
+          emptyPcBinSizeMap.set(key, entry);
+          if (emptyPcLocations.length < 100) {
+            const parts = parseLocationCode(loc);
+            emptyPcLocations.push({
+              location: loc,
+              aisle_prefix: parts.aisle_prefix,
+              level: parts.level,
+              bin_size: key,
+              bin_type: binType,
+              height_mm: binDims ? binDims.height : null,
+              width_mm: binDims ? binDims.width : null,
+              depth_mm: binDims ? binDims.depth : null,
+              usable_volume_mm3: binUsableVolume || null,
+            });
+          }
+        } else {
+          pcLowLevelOccupiedLocationCount++;
+        }
+      }
       if (isPcArea && levelNum < HIGH_LEVEL_THRESHOLD && maxBinQty > 0) {
         pcCapacityValues.push(maxBinQty);
         pcActiveLocations.add(loc);
       }
 
-      const sku = String(row.BLITEM || row.sku || "").trim().toUpperCase();
       if (!sku) continue;
 
       if (!skuCapacityMap.has(sku)) {
         skuCapacityMap.set(sku, {
           low_level_non_pc_capacity: 0,
           low_level_pc_capacity: 0,
+          low_level_non_pc_usable_volume_mm3: 0,
+          low_level_pc_usable_volume_mm3: 0,
           low_level_non_pc_locations: new Set(),
           low_level_pc_locations: new Set(),
+          low_level_non_pc_bin_sizes: new Set(),
+          low_level_pc_bin_sizes: new Set(),
         });
       }
 
@@ -1556,10 +1659,14 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
 
       if (isPcArea) {
         skuCapacity.low_level_pc_capacity += maxBinQty;
+        skuCapacity.low_level_pc_usable_volume_mm3 += binUsableVolume;
         skuCapacity.low_level_pc_locations.add(loc);
+        if (binSize) skuCapacity.low_level_pc_bin_sizes.add(binSize);
       } else {
         skuCapacity.low_level_non_pc_capacity += maxBinQty;
+        skuCapacity.low_level_non_pc_usable_volume_mm3 += binUsableVolume;
         skuCapacity.low_level_non_pc_locations.add(loc);
+        if (binSize) skuCapacity.low_level_non_pc_bin_sizes.add(binSize);
       }
     }
 
@@ -1601,6 +1708,8 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
     let pcZoneTotalPickQty = 0, pcZoneTotalLineCount = 0;
     let pcZonePcPickQty    = 0, pcZonePcLineCount = 0;
     let pcZoneNonPcPickQty = 0, pcZoneNonPcLineCount = 0;
+    let pcZoneLowLevelPcPickQty = 0, pcZoneLowLevelPcLineCount = 0;
+    let pcZoneLowLevelNonPcPickQty = 0, pcZoneLowLevelNonPcLineCount = 0;
 
     const allOrders     = new Set();
     const allSkus       = new Set();
@@ -1618,9 +1727,10 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
       return map.get(key);
     }
 
-    function recordPcZoneActivity({ sku, grp, loc, ord, qty, isPcArea }) {
+    function recordPcZoneActivity({ sku, grp, loc, ord, qty, isPcArea, levelNum }) {
       pcZoneTotalPickQty += qty;
       pcZoneTotalLineCount++;
+      const isLowLevel = levelNum < HIGH_LEVEL_THRESHOLD;
       const entry = getOrInit(pcZoneSkuMap, sku, () => ({
         sku,
         item_group: grp,
@@ -1634,6 +1744,12 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         non_pc_pick_qty: 0,
         non_pc_line_count: 0,
         non_pc_orders: new Set(),
+        low_level_pc_pick_qty: 0,
+        low_level_pc_line_count: 0,
+        low_level_pc_orders: new Set(),
+        low_level_non_pc_pick_qty: 0,
+        low_level_non_pc_line_count: 0,
+        low_level_non_pc_orders: new Set(),
       }));
 
       entry.pick_qty += qty;
@@ -1648,6 +1764,13 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         entry.pc_line_count++;
         if (ord) entry.pc_orders.add(ord);
         if (loc) entry.pc_locations.add(loc);
+        if (isLowLevel) {
+          pcZoneLowLevelPcPickQty += qty;
+          pcZoneLowLevelPcLineCount++;
+          entry.low_level_pc_pick_qty += qty;
+          entry.low_level_pc_line_count++;
+          if (ord) entry.low_level_pc_orders.add(ord);
+        }
       } else {
         pcZoneNonPcPickQty += qty;
         pcZoneNonPcLineCount++;
@@ -1655,6 +1778,13 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         entry.non_pc_pick_qty += qty;
         entry.non_pc_line_count++;
         if (ord) entry.non_pc_orders.add(ord);
+        if (isLowLevel) {
+          pcZoneLowLevelNonPcPickQty += qty;
+          pcZoneLowLevelNonPcLineCount++;
+          entry.low_level_non_pc_pick_qty += qty;
+          entry.low_level_non_pc_line_count++;
+          if (ord) entry.low_level_non_pc_orders.add(ord);
+        }
       }
     }
 
@@ -1678,7 +1808,7 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
         const isPcArea = Boolean(enrich.is_pc);
 
         if (pcZoneChannelFilter.has(ch)) {
-          recordPcZoneActivity({ sku, grp, loc, ord, qty, isPcArea });
+          recordPcZoneActivity({ sku, grp, loc, ord, qty, isPcArea, levelNum });
         }
 
         if (channelFilter.size > 0 && !channelFilter.has(ch)) continue;
@@ -1813,8 +1943,12 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
     const getSkuCapacity = (sku) => skuCapacityMap.get(sku) || {
       low_level_non_pc_capacity: 0,
       low_level_pc_capacity: 0,
+      low_level_non_pc_usable_volume_mm3: 0,
+      low_level_pc_usable_volume_mm3: 0,
       low_level_non_pc_locations: new Set(),
       low_level_pc_locations: new Set(),
+      low_level_non_pc_bin_sizes: new Set(),
+      low_level_pc_bin_sizes: new Set(),
     };
 
     const topSkus = [...skuMap.values()]
@@ -1912,10 +2046,58 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
     const pcCapacityBenchmark = medianNumber(pcCapacityValues);
     const pcZoneNote = !binlocAvail
       ? "PC analysis requires the PI-App to publish warehouse binloc snapshots."
-      : pcCapacityBenchmark > 0
-        ? `What-if PC estimates use the median active PC max bin qty from binloc (${Math.round(pcCapacityBenchmark).toLocaleString()} units) as the assumed single PC slot capacity.`
-        : "BINLOC is available, but no active PC locations with max bin quantity were found for the selected client.";
+      : emptyPcBinSizeMap.size > 0
+        ? "PC recommendations use empty low-level Peak Capacity locations from BINLOC. Capacity is estimated from item dimensions when available, otherwise from the SKU's current low-level bin density."
+        : "BINLOC is available, but no empty low-level Peak Capacity locations were found for the selected client.";
     const pcZoneShare = (v) => pcZoneTotalPickQty > 0 ? Math.round((v / pcZoneTotalPickQty) * 10000) / 100 : 0;
+    const emptyPcBinSizes = [...emptyPcBinSizeMap.values()]
+      .sort((a, b) => b.location_count - a.location_count || String(a.bin_size).localeCompare(String(b.bin_size)));
+    const availablePcBinTypes = emptyPcBinSizes.filter(bin => bin.usable_volume_mm3 > 0);
+
+    function estimateSkuUnitVolumeMm3(sku, capacity) {
+      const itemDims = itemDimensionMap.get(sku);
+      const itemVolume = binSizeVolume(itemDims);
+      if (itemVolume > 0) {
+        return { unit_volume_mm3: itemVolume, source: "item_dimensions" };
+      }
+      if (capacity.low_level_non_pc_capacity > 0 && capacity.low_level_non_pc_usable_volume_mm3 > 0) {
+        return {
+          unit_volume_mm3: capacity.low_level_non_pc_usable_volume_mm3 / capacity.low_level_non_pc_capacity,
+          source: "current_bin_density",
+        };
+      }
+      return { unit_volume_mm3: 0, source: "" };
+    }
+
+    function scorePcBinOptions(sku, demandQty, currentReplens, capacity) {
+      const unitEstimate = estimateSkuUnitVolumeMm3(sku, capacity);
+      const options = [];
+      for (const bin of availablePcBinTypes) {
+        const estimatedCapacity = unitEstimate.unit_volume_mm3 > 0
+          ? Math.floor(Number(bin.usable_volume_mm3 || 0) / unitEstimate.unit_volume_mm3)
+          : 0;
+        if (!(estimatedCapacity > 0)) continue;
+        const estimatedReplens = safeCeilDiv(demandQty, estimatedCapacity);
+        options.push({
+          bin_size: bin.bin_size,
+          empty_location_count: bin.location_count,
+          estimated_pc_capacity: estimatedCapacity,
+          estimated_replenishments_in_pc: estimatedReplens,
+          replenishment_delta: (
+            currentReplens != null && estimatedReplens != null ? currentReplens - estimatedReplens : null
+          ),
+          capacity_source: unitEstimate.source,
+        });
+      }
+
+      options.sort((a, b) =>
+        (b.replenishment_delta ?? -999999) - (a.replenishment_delta ?? -999999) ||
+        b.estimated_pc_capacity - a.estimated_pc_capacity ||
+        b.empty_location_count - a.empty_location_count ||
+        String(a.bin_size).localeCompare(String(b.bin_size))
+      );
+      return options;
+    }
 
     const topPcSkus = [...pcZoneSkuMap.values()]
       .filter(e => e.pc_pick_qty > 0)
@@ -1946,6 +2128,9 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
           pc_line_count: e.pc_line_count,
           pc_order_count: e.pc_orders.size,
           pc_location_count: e.pc_locations.size,
+          low_level_pc_pick_qty: e.low_level_pc_pick_qty,
+          low_level_pc_line_count: e.low_level_pc_line_count,
+          low_level_pc_order_count: e.low_level_pc_orders.size,
           pc_share_of_sku: roundPct(e.pc_pick_qty, e.pick_qty),
           share_of_total_picks: pcZoneShare(e.pc_pick_qty),
           current_non_pc_pick_qty: e.non_pc_pick_qty,
@@ -1964,30 +2149,41 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
       });
 
     const topNonPcSkus = [...pcZoneSkuMap.values()]
-      .filter(e => e.pc_pick_qty <= 0)
-      .sort(sortRank)
-      .slice(0, limit)
+      .filter(e => e.low_level_non_pc_pick_qty > 0)
       .map(e => {
         const capacity = getSkuCapacity(e.sku);
-        const currentReplens = safeCeilDiv(e.pick_qty, capacity.low_level_non_pc_capacity);
-        const pcReplens = safeCeilDiv(e.pick_qty, pcCapacityBenchmark);
+        const currentReplens = safeCeilDiv(e.low_level_non_pc_pick_qty, capacity.low_level_non_pc_capacity);
+        const binOptions = scorePcBinOptions(e.sku, e.low_level_non_pc_pick_qty, currentReplens, capacity);
+        const bestOption = binOptions[0] || null;
         return {
           sku: e.sku,
           item_group: e.item_group,
           total_pick_qty: e.pick_qty,
           total_line_count: e.line_count,
           order_count: e.orders.size,
-          share_of_total_picks: pcZoneShare(e.pick_qty),
+          share_of_total_picks: pcZoneShare(e.low_level_non_pc_pick_qty),
+          low_level_non_pc_pick_qty: e.low_level_non_pc_pick_qty,
+          low_level_non_pc_line_count: e.low_level_non_pc_line_count,
+          low_level_non_pc_order_count: e.low_level_non_pc_orders.size,
           low_level_non_pc_capacity: capacity.low_level_non_pc_capacity,
           low_level_non_pc_location_count: capacity.low_level_non_pc_locations.size,
+          current_bin_sizes: [...capacity.low_level_non_pc_bin_sizes].sort().join(", "),
           current_estimated_replenishments: currentReplens,
-          pc_capacity_benchmark_units: pcCapacityBenchmark,
-          estimated_replenishments_in_pc: pcReplens,
-          estimated_replenishments_delta: (
-            currentReplens != null && pcReplens != null ? currentReplens - pcReplens : null
-          ),
+          recommended_bin_size: bestOption?.bin_size || "",
+          recommended_empty_locations: bestOption?.empty_location_count ?? null,
+          recommended_pc_capacity: bestOption?.estimated_pc_capacity ?? null,
+          estimated_replenishments_in_pc: bestOption?.estimated_replenishments_in_pc ?? null,
+          estimated_replenishments_delta: bestOption?.replenishment_delta ?? null,
+          capacity_source: bestOption?.capacity_source || "",
+          pc_bin_options: binOptions.slice(0, 5),
         };
-      });
+      })
+      .sort((a, b) => {
+        const aImpact = a.estimated_replenishments_delta ?? -999999;
+        const bImpact = b.estimated_replenishments_delta ?? -999999;
+        return bImpact - aImpact || b.low_level_non_pc_pick_qty - a.low_level_non_pc_pick_qty || a.sku.localeCompare(b.sku);
+      })
+      .slice(0, limit);
 
     const peakDay = dailyBreakdown.reduce((best, d) => (!best || d.pick_qty > best.pick_qty) ? d : best, null);
 
@@ -2058,15 +2254,31 @@ app.get("/api/reports-data", requireAdminApi, async (req, res) => {
           pc_pick_qty: pcZonePcPickQty,
           pc_line_count: pcZonePcLineCount,
           pc_order_count: pcZonePcOrders.size,
+          low_level_pc_pick_qty: pcZoneLowLevelPcPickQty,
+          low_level_pc_line_count: pcZoneLowLevelPcLineCount,
           non_pc_pick_qty: pcZoneNonPcPickQty,
           non_pc_line_count: pcZoneNonPcLineCount,
           non_pc_order_count: pcZoneNonPcOrders.size,
+          low_level_non_pc_pick_qty: pcZoneLowLevelNonPcPickQty,
+          low_level_non_pc_line_count: pcZoneLowLevelNonPcLineCount,
           pc_pick_share: roundPct(pcZonePcPickQty, pcZoneTotalPickQty),
           pc_line_share: roundPct(pcZonePcLineCount, pcZoneTotalLineCount),
           pc_sku_count: [...pcZoneSkuMap.values()].filter(e => e.pc_pick_qty > 0).length,
           non_pc_only_sku_count: [...pcZoneSkuMap.values()].filter(e => e.pc_pick_qty <= 0).length,
           pc_active_location_count: pcActiveLocations.size,
+          pc_low_level_location_count: pcLowLevelLocationCount,
+          pc_low_level_empty_location_count: pcLowLevelEmptyLocationCount,
+          pc_low_level_occupied_location_count: pcLowLevelOccupiedLocationCount,
+          pc_empty_bin_size_count: emptyPcBinSizes.length,
           pc_capacity_benchmark_units: pcCapacityBenchmark,
+          item_dimension_sku_count: itemDimensionMap.size,
+        },
+        availability: {
+          empty_location_count: pcLowLevelEmptyLocationCount,
+          occupied_location_count: pcLowLevelOccupiedLocationCount,
+          total_low_level_location_count: pcLowLevelLocationCount,
+          bin_sizes: emptyPcBinSizes,
+          sample_locations: emptyPcLocations,
         },
         top_pc_skus: topPcSkus,
         top_non_pc_skus: topNonPcSkus,
