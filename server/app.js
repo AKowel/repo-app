@@ -2,6 +2,7 @@
 const path    = require("path");
 const fs      = require("fs");
 const XLSX    = require("xlsx");
+const ExcelJS = require("exceljs");
 const express = require("express");
 const session = require("express-session");
 const { config }          = require("./config");
@@ -734,7 +735,7 @@ app.get("/api/order-lines", requireAdminApi, async (req, res) => {
   }
 });
 
-// ── API: order lines export (streaming CSV — O(1) memory regardless of size) ──
+// ── API: order lines export (streaming XLSX via ExcelJS — O(1) memory) ───────
 app.get("/api/order-lines/export", requireAdminApi, async (req, res) => {
   const { client, mode, date, start, end, channels, item_group } = req.query;
   if (!client) return res.status(400).json({ ok: false, error: "client param required." });
@@ -752,15 +753,25 @@ app.get("/api/order-lines/export", requireAdminApi, async (req, res) => {
     const dates     = loadedDates;
     const dateLabel = dates.length === 1 ? dates[0] : `${dates[dates.length - 1]}_to_${dates[0]}`;
     const chanPart  = (channelSet && channelSet.size) ? `_${[...channelSet].join("-")}` : "";
-    const filename  = `order-lines_${client}_${dateLabel}${chanPart}.csv`;
+    const filename  = `order-lines_${client}_${dateLabel}${chanPart}.xlsx`;
 
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
-    const esc = v => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
-    const row = (...cols) => cols.map(esc).join(",") + "\r\n";
-
-    res.write(row("Order No","Line","Item","Date","Qty","Item Group","Channel","Customer","Bin","Pick Qty"));
+    const workbook  = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: res });
+    const worksheet = workbook.addWorksheet("Order Lines");
+    worksheet.columns = [
+      { header: "Order No",  key: "a", width: 16 },
+      { header: "Line",      key: "b", width: 7  },
+      { header: "Item",      key: "c", width: 14 },
+      { header: "Date",      key: "d", width: 13 },
+      { header: "Qty",       key: "e", width: 7  },
+      { header: "Item Group",key: "f", width: 14 },
+      { header: "Channel",   key: "g", width: 22 },
+      { header: "Customer",  key: "h", width: 30 },
+      { header: "Bin",       key: "i", width: 14 },
+      { header: "Pick Qty",  key: "j", width: 9  },
+    ];
 
     const BATCH = 7;
     for (let i = 0; i < loadedDates.length; i += BATCH) {
@@ -772,16 +783,17 @@ app.get("/api/order-lines/export", requireAdminApi, async (req, res) => {
         for (const r of rows) {
           if (channelSet  && !channelSet.has(String(r.order_channel || "").toLowerCase())) continue;
           if (itemGroupLc && String(r.item_group || "").toLowerCase() !== itemGroupLc)     continue;
-          res.write(row(
+          worksheet.addRow([
             r.order_number, r.order_line, r.item, r.fulfilment_date,
             r.qty_fulfilled, r.item_group, r.order_channel, r.customer_name,
-            r.picking_location, r.pick_qty
-          ));
+            r.picking_location, r.pick_qty,
+          ]).commit();
         }
       }
     }
 
-    res.end();
+    await worksheet.commit();
+    await workbook.commit();
   } catch (err) {
     if (!res.headersSent) res.status(500).json({ ok: false, error: String(err.message || err) });
     else res.end();
