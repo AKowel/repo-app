@@ -650,17 +650,21 @@ app.get("/api/order-lines", requireAdminApi, async (req, res) => {
       });
     }
 
-    // metaOnly: scan all dates in parallel to collect distinct filter options
+    // metaOnly: scan all dates in batches to collect distinct filter options
     if (metaOnly === "1") {
       const allChannels   = new Set();
       const allItemGroups = new Set();
-      const metaResults   = await Promise.all(
-        loadedDates.map(d => service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] })))
-      );
-      for (const { rows: dr = [] } of metaResults) {
-        for (const r of dr) {
-          if (r.order_channel) allChannels.add(r.order_channel);
-          if (r.item_group)    allItemGroups.add(r.item_group);
+      const BATCH = 14;
+      for (let i = 0; i < loadedDates.length; i += BATCH) {
+        const batch = loadedDates.slice(i, i + BATCH);
+        const batchResults = await Promise.all(
+          batch.map(d => service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] })))
+        );
+        for (const { rows: dr = [] } of batchResults) {
+          for (const r of dr) {
+            if (r.order_channel) allChannels.add(r.order_channel);
+            if (r.item_group)    allItemGroups.add(r.item_group);
+          }
         }
       }
       return res.json({
@@ -742,26 +746,30 @@ app.get("/api/order-lines/export", requireAdminApi, async (req, res) => {
       return res.status(404).json({ ok: false, error: "No data found for the selected window." });
     }
 
-    const channelSet  = channels   ? new Set(channels.split(",").map(s => s.trim().toLowerCase()).filter(Boolean))   : null;
+    const channelSet  = channels   ? new Set(channels.split(",").map(s => s.trim().toLowerCase()).filter(Boolean)) : null;
     const itemGroupLc = item_group ? item_group.toLowerCase() : null;
 
-    // Load all dates in parallel — snapshots are cached so repeat views are instant
-    const results = await Promise.all(
-      loadedDates.map(d => service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] })))
-    );
-
+    // Process in batches of 14 days: parallel within each batch (fast), but each
+    // batch is released before the next loads so heap stays bounded.
+    const BATCH = 14;
     const header = ["Order No", "Line", "Item", "Date", "Qty", "Item Group", "Channel", "Customer", "Bin", "Pick Qty"];
     const wsData = [header];
 
-    for (const { rows = [] } of results) {
-      for (const r of rows) {
-        if (channelSet  && !channelSet.has(String(r.order_channel || "").toLowerCase())) continue;
-        if (itemGroupLc && String(r.item_group || "").toLowerCase() !== itemGroupLc)     continue;
-        wsData.push([
-          r.order_number, r.order_line, r.item, r.fulfilment_date,
-          r.qty_fulfilled, r.item_group, r.order_channel, r.customer_name,
-          r.picking_location, r.pick_qty,
-        ]);
+    for (let i = 0; i < loadedDates.length; i += BATCH) {
+      const batch = loadedDates.slice(i, i + BATCH);
+      const batchResults = await Promise.all(
+        batch.map(d => service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] })))
+      );
+      for (const { rows = [] } of batchResults) {
+        for (const r of rows) {
+          if (channelSet  && !channelSet.has(String(r.order_channel || "").toLowerCase())) continue;
+          if (itemGroupLc && String(r.item_group || "").toLowerCase() !== itemGroupLc)     continue;
+          wsData.push([
+            r.order_number, r.order_line, r.item, r.fulfilment_date,
+            r.qty_fulfilled, r.item_group, r.order_channel, r.customer_name,
+            r.picking_location, r.pick_qty,
+          ]);
+        }
       }
     }
 

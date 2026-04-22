@@ -378,17 +378,37 @@
       return;
     }
 
-    // Multi-date: server generates XLSX and streams it — just navigate to the URL
+    // Multi-date: fetch binary from server, trigger download via blob URL
     var p = buildParams(false);
     if (!isAllSelected && checked.length) p.set("channels", checked.join(","));
     if (selItemGroup.value) p.set("item_group", selItemGroup.value);
 
-    var a = document.createElement("a");
-    a.href = "/api/order-lines/export?" + p.toString();
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    btnExport.disabled  = true;
+    btnExport.innerHTML = "Exporting…";
+
+    fetch("/api/order-lines/export?" + p.toString())
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || r.statusText); });
+        var disposition = r.headers.get("Content-Disposition") || "";
+        var match = disposition.match(/filename="([^"]+)"/);
+        var filename = match ? match[1] : "order-lines.xlsx";
+        return r.blob().then(function (blob) { return { blob: blob, filename: filename }; });
+      })
+      .then(function (obj) {
+        var url = URL.createObjectURL(obj.blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = obj.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      })
+      .catch(function (err) { alert("Export failed: " + err.message); })
+      .finally(function () {
+        btnExport.disabled  = false;
+        btnExport.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export .xlsx';
+      });
   }
 
   function buildAndDownloadXlsx(rows, meta, selectedChannels, isAllSelected) {
