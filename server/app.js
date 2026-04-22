@@ -734,7 +734,7 @@ app.get("/api/order-lines", requireAdminApi, async (req, res) => {
   }
 });
 
-// ── API: order lines export (server-side XLSX, parallel loading) ─────────────
+// ── API: order lines export (streaming CSV — O(1) memory regardless of size) ──
 app.get("/api/order-lines/export", requireAdminApi, async (req, res) => {
   const { client, mode, date, start, end, channels, item_group } = req.query;
   if (!client) return res.status(400).json({ ok: false, error: "client param required." });
@@ -749,12 +749,20 @@ app.get("/api/order-lines/export", requireAdminApi, async (req, res) => {
     const channelSet  = channels   ? new Set(channels.split(",").map(s => s.trim().toLowerCase()).filter(Boolean)) : null;
     const itemGroupLc = item_group ? item_group.toLowerCase() : null;
 
-    // Process in batches of 14 days: parallel within each batch (fast), but each
-    // batch is released before the next loads so heap stays bounded.
-    const BATCH = 14;
-    const header = ["Order No", "Line", "Item", "Date", "Qty", "Item Group", "Channel", "Customer", "Bin", "Pick Qty"];
-    const wsData = [header];
+    const dates     = loadedDates;
+    const dateLabel = dates.length === 1 ? dates[0] : `${dates[dates.length - 1]}_to_${dates[0]}`;
+    const chanPart  = (channelSet && channelSet.size) ? `_${[...channelSet].join("-")}` : "";
+    const filename  = `order-lines_${client}_${dateLabel}${chanPart}.csv`;
 
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+    const esc = v => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+    const row = (...cols) => cols.map(esc).join(",") + "\r\n";
+
+    res.write(row("Order No","Line","Item","Date","Qty","Item Group","Channel","Customer","Bin","Pick Qty"));
+
+    const BATCH = 14;
     for (let i = 0; i < loadedDates.length; i += BATCH) {
       const batch = loadedDates.slice(i, i + BATCH);
       const batchResults = await Promise.all(
@@ -764,34 +772,19 @@ app.get("/api/order-lines/export", requireAdminApi, async (req, res) => {
         for (const r of rows) {
           if (channelSet  && !channelSet.has(String(r.order_channel || "").toLowerCase())) continue;
           if (itemGroupLc && String(r.item_group || "").toLowerCase() !== itemGroupLc)     continue;
-          wsData.push([
+          res.write(row(
             r.order_number, r.order_line, r.item, r.fulfilment_date,
             r.qty_fulfilled, r.item_group, r.order_channel, r.customer_name,
-            r.picking_location, r.pick_qty,
-          ]);
+            r.picking_location, r.pick_qty
+          ));
         }
       }
     }
 
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws["!cols"] = [
-      { wch: 14 }, { wch: 6 }, { wch: 12 }, { wch: 12 }, { wch: 6 },
-      { wch: 12 }, { wch: 20 }, { wch: 28 }, { wch: 12 }, { wch: 8 },
-    ];
-    const wb  = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Order Lines");
-    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-
-    const dates     = loadedDates;
-    const dateLabel = dates.length === 1 ? dates[0] : `${dates[dates.length - 1]}_to_${dates[0]}`;
-    const chanPart  = (channelSet && channelSet.size) ? `_${[...channelSet].join("-")}` : "";
-    const filename  = `order-lines_${client}_${dateLabel}${chanPart}.xlsx`;
-
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.send(buf);
+    res.end();
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err.message || err) });
+    if (!res.headersSent) res.status(500).json({ ok: false, error: String(err.message || err) });
+    else res.end();
   }
 });
 

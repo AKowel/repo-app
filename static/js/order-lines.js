@@ -310,8 +310,6 @@
 
   // ── Export modal ──────────────────────────────────────────────────────
   function showExportModal() {
-    if (typeof XLSX === "undefined") { alert("Excel library not loaded. Check your connection and reload."); return; }
-
     if (!isSingleDate()) {
       // Fetch the full channel list across the entire window before opening
       olExportModalBody.innerHTML = '<p style="font-size:12px;color:var(--text-soft)">Loading available channels…</p>';
@@ -329,6 +327,7 @@
       return;
     }
 
+    if (typeof XLSX === "undefined") { alert("Excel library not loaded. Check your connection and reload."); return; }
     var channels = availableChannels.length ? availableChannels
       : Array.from(new Set(filteredRows.map(function (r) { return r.order_channel; }).filter(Boolean))).sort();
     renderExportModalBody(channels);
@@ -391,7 +390,7 @@
         if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || r.statusText); });
         var disposition = r.headers.get("Content-Disposition") || "";
         var match = disposition.match(/filename="([^"]+)"/);
-        var filename = match ? match[1] : "order-lines.xlsx";
+        var filename = match ? match[1] : "order-lines.csv";
         return r.blob().then(function (blob) { return { blob: blob, filename: filename }; });
       })
       .then(function (obj) {
@@ -407,7 +406,7 @@
       .catch(function (err) { alert("Export failed: " + err.message); })
       .finally(function () {
         btnExport.disabled  = false;
-        btnExport.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export .xlsx';
+        btnExport.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export';
       });
   }
 
