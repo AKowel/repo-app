@@ -117,12 +117,15 @@ class SnapshotService {
     return (response.items || [])[0] || null;
   }
 
-  async loadSnapshot(collectionKey, clientCode, snapshotDate) {
+  async loadSnapshot(collectionKey, clientCode, snapshotDate, { noCache = false } = {}) {
     const resolvedDate = snapshotDate || null;
     const cacheKey = this._cacheKey(collectionKey, clientCode, resolvedDate);
-    const cached = this._cacheGet(cacheKey, resolvedDate || todayYMD());
-    if (cached) {
-      return { rows: cached.rows, meta: cached.meta, fromCache: true };
+
+    if (!noCache) {
+      const cached = this._cacheGet(cacheKey, resolvedDate || todayYMD());
+      if (cached) {
+        return { rows: cached.rows, meta: cached.meta, fromCache: true };
+      }
     }
 
     const collectionName = this.collectionName(collectionKey);
@@ -159,7 +162,9 @@ class SnapshotService {
       total_pick_qty: fileMeta.total_pick_qty ?? null,
     };
 
-    this.cache.set(cacheKey, { loadedAt: Date.now(), rows, meta });
+    if (!noCache) {
+      this.cache.set(cacheKey, { loadedAt: Date.now(), rows, meta });
+    }
     return { rows, meta, fromCache: false };
   }
 

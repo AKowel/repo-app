@@ -762,16 +762,22 @@ app.get("/api/order-lines/export", requireAdminApi, async (req, res) => {
 
     res.write(row("Order No","Line","Item","Date","Qty","Item Group","Channel","Customer","Bin","Pick Qty"));
 
-    for (const d of loadedDates) {
-      const { rows = [] } = await service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] }));
-      for (const r of rows) {
-        if (channelSet  && !channelSet.has(String(r.order_channel || "").toLowerCase())) continue;
-        if (itemGroupLc && String(r.item_group || "").toLowerCase() !== itemGroupLc)     continue;
-        res.write(row(
-          r.order_number, r.order_line, r.item, r.fulfilment_date,
-          r.qty_fulfilled, r.item_group, r.order_channel, r.customer_name,
-          r.picking_location, r.pick_qty
-        ));
+    const BATCH = 7;
+    for (let i = 0; i < loadedDates.length; i += BATCH) {
+      const batch = loadedDates.slice(i, i + BATCH);
+      const batchResults = await Promise.all(
+        batch.map(d => service.loadSnapshot("order_lines", client, d, { noCache: true }).catch(() => ({ rows: [] })))
+      );
+      for (const { rows = [] } of batchResults) {
+        for (const r of rows) {
+          if (channelSet  && !channelSet.has(String(r.order_channel || "").toLowerCase())) continue;
+          if (itemGroupLc && String(r.item_group || "").toLowerCase() !== itemGroupLc)     continue;
+          res.write(row(
+            r.order_number, r.order_line, r.item, r.fulfilment_date,
+            r.qty_fulfilled, r.item_group, r.order_channel, r.customer_name,
+            r.picking_location, r.pick_qty
+          ));
+        }
       }
     }
 
