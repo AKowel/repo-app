@@ -1,6 +1,7 @@
 "use strict";
 const path    = require("path");
 const fs      = require("fs");
+const XLSX    = require("xlsx");
 const express = require("express");
 const session = require("express-session");
 const { config }          = require("./config");
@@ -631,38 +632,156 @@ app.get("/api/files/:imageId", requireAdminApi, async (req, res) => {
 
 // ── API: order lines ──────────────────────────────────────────────────────
 app.get("/api/order-lines", requireAdminApi, async (req, res) => {
-  const { client, date, customer, channel, item_group, q } = req.query;
+  const { client, mode, date, start, end, customer, channel, channels, item_group, q, noTruncate, metaOnly } = req.query;
+  // channels = comma-separated list for multi-channel export; channel = single value for filter dropdown
+  const channelSet = channels ? new Set(channels.split(",").map(s => s.trim().toLowerCase()).filter(Boolean))
+                   : channel  ? new Set([channel.toLowerCase()])
+                   : null;
   if (!client) return res.status(400).json({ ok: false, error: "client param required." });
   try {
     const availableDates = filterCompleteSnapshotDates(await service.listSnapshotDates("order_lines", client));
-    const selectedDate = availableDates.includes(String(date || "").trim())
-      ? String(date || "").trim()
-      : (availableDates[0] || null);
 
-    if (!selectedDate) {
+    const loadedDates = resolveSnapshotWindowDates(availableDates, mode || "latest", date, start, end, 366);
+
+    if (!loadedDates.length) {
       return res.json({
-        ok: true,
-        rows: [],
-        meta: null,
-        fromCache: false,
-        totalRows: 0,
-        filterOptions: { channels: [], item_groups: [] },
+        ok: true, rows: [], meta: { loaded_dates: [] }, fromCache: false,
+        totalRows: 0, filterOptions: { channels: [], item_groups: [] },
       });
     }
 
-    const { rows: allRows, meta, fromCache } = await service.loadSnapshot("order_lines", client, selectedDate);
+    // metaOnly: scan all dates in parallel to collect distinct filter options
+    if (metaOnly === "1") {
+      const allChannels   = new Set();
+      const allItemGroups = new Set();
+      const metaResults   = await Promise.all(
+        loadedDates.map(d => service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] })))
+      );
+      for (const { rows: dr = [] } of metaResults) {
+        for (const r of dr) {
+          if (r.order_channel) allChannels.add(r.order_channel);
+          if (r.item_group)    allItemGroups.add(r.item_group);
+        }
+      }
+      return res.json({
+        ok: true, rows: [],
+        meta: { window_dates: loadedDates },
+        filterOptions: {
+          channels:    [...allChannels].sort(),
+          item_groups: [...allItemGroups].sort(),
+        },
+      });
+    }
 
-    let rows = allRows;
-    if (q)          { const ql = q.toLowerCase();   rows = rows.filter(r => String(r.order_number || "").toLowerCase().includes(ql) || String(r.item || "").toLowerCase().includes(ql) || String(r.customer_name || "").toLowerCase().includes(ql)); }
-    if (customer)   { const cl = customer.toLowerCase(); rows = rows.filter(r => String(r.customer_name || "").toLowerCase().includes(cl)); }
-    if (channel)    { rows = rows.filter(r => String(r.order_channel || "").toLowerCase() === channel.toLowerCase()); }
-    if (item_group) { rows = rows.filter(r => String(r.item_group || "").toLowerCase() === item_group.toLowerCase()); }
+    const isMultiDate  = loadedDates.length > 1;
+    const hasFilter    = !!(q || customer || channelSet || item_group);
+    const forceAll     = noTruncate === "1";
 
-    // Build distinct filter options from ALL rows (not filtered)
-    const channels    = [...new Set(allRows.map(r => r.order_channel).filter(Boolean))].sort();
-    const item_groups = [...new Set(allRows.map(r => r.item_group).filter(Boolean))].sort();
+    const datesToLoad = (isMultiDate && !hasFilter && !forceAll) ? [loadedDates[0]] : loadedDates;
+    const truncated   = isMultiDate && !hasFilter && !forceAll;
 
-    return res.json({ ok: true, rows, meta, fromCache, totalRows: allRows.length, filterOptions: { channels, item_groups } });
+    const ql = q        ? q.toLowerCase()        : null;
+    const cl = customer ? customer.toLowerCase() : null;
+
+    let totalRawRows = 0;
+    const rows = [];
+    let filterOptionsRows = null;
+
+    for (const d of datesToLoad) {
+      const { rows: dateRows = [] } = await service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] }));
+      totalRawRows += dateRows.length;
+      if (!filterOptionsRows) filterOptionsRows = dateRows;
+
+      if (isMultiDate) {
+        for (const r of dateRows) {
+          if (ql && !(String(r.order_number || "").toLowerCase().includes(ql) || String(r.item || "").toLowerCase().includes(ql) || String(r.customer_name || "").toLowerCase().includes(ql))) continue;
+          if (cl && !String(r.customer_name || "").toLowerCase().includes(cl)) continue;
+          if (channelSet && !channelSet.has(String(r.order_channel || "").toLowerCase())) continue;
+          if (item_group && String(r.item_group || "").toLowerCase() !== item_group.toLowerCase()) continue;
+          rows.push(r);
+        }
+      } else {
+        rows.push(...dateRows);
+      }
+    }
+
+    let finalRows = rows;
+    if (!isMultiDate) {
+      if (ql)          finalRows = finalRows.filter(r => String(r.order_number || "").toLowerCase().includes(ql) || String(r.item || "").toLowerCase().includes(ql) || String(r.customer_name || "").toLowerCase().includes(ql));
+      if (cl)          finalRows = finalRows.filter(r => String(r.customer_name || "").toLowerCase().includes(cl));
+      if (channelSet)  finalRows = finalRows.filter(r => channelSet.has(String(r.order_channel || "").toLowerCase()));
+      if (item_group)  finalRows = finalRows.filter(r => String(r.item_group || "").toLowerCase() === item_group.toLowerCase());
+    }
+
+    const optionSource = filterOptionsRows || [];
+    const availableChannels = [...new Set(optionSource.map(r => r.order_channel).filter(Boolean))].sort();
+    const item_groups = [...new Set(optionSource.map(r => r.item_group).filter(Boolean))].sort();
+
+    return res.json({
+      ok: true,
+      rows: isMultiDate ? rows : finalRows,
+      meta: { loaded_dates: datesToLoad, window_dates: loadedDates, truncated },
+      fromCache: false,
+      totalRows: totalRawRows,
+      filterOptions: { channels: availableChannels, item_groups },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+// ── API: order lines export (server-side XLSX, parallel loading) ─────────────
+app.get("/api/order-lines/export", requireAdminApi, async (req, res) => {
+  const { client, mode, date, start, end, channels, item_group } = req.query;
+  if (!client) return res.status(400).json({ ok: false, error: "client param required." });
+  try {
+    const availableDates = filterCompleteSnapshotDates(await service.listSnapshotDates("order_lines", client));
+    const loadedDates    = resolveSnapshotWindowDates(availableDates, mode || "latest", date, start, end, 366);
+
+    if (!loadedDates.length) {
+      return res.status(404).json({ ok: false, error: "No data found for the selected window." });
+    }
+
+    const channelSet  = channels   ? new Set(channels.split(",").map(s => s.trim().toLowerCase()).filter(Boolean))   : null;
+    const itemGroupLc = item_group ? item_group.toLowerCase() : null;
+
+    // Load all dates in parallel — snapshots are cached so repeat views are instant
+    const results = await Promise.all(
+      loadedDates.map(d => service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] })))
+    );
+
+    const header = ["Order No", "Line", "Item", "Date", "Qty", "Item Group", "Channel", "Customer", "Bin", "Pick Qty"];
+    const wsData = [header];
+
+    for (const { rows = [] } of results) {
+      for (const r of rows) {
+        if (channelSet  && !channelSet.has(String(r.order_channel || "").toLowerCase())) continue;
+        if (itemGroupLc && String(r.item_group || "").toLowerCase() !== itemGroupLc)     continue;
+        wsData.push([
+          r.order_number, r.order_line, r.item, r.fulfilment_date,
+          r.qty_fulfilled, r.item_group, r.order_channel, r.customer_name,
+          r.picking_location, r.pick_qty,
+        ]);
+      }
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    ws["!cols"] = [
+      { wch: 14 }, { wch: 6 }, { wch: 12 }, { wch: 12 }, { wch: 6 },
+      { wch: 12 }, { wch: 20 }, { wch: 28 }, { wch: 12 }, { wch: 8 },
+    ];
+    const wb  = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Order Lines");
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    const dates     = loadedDates;
+    const dateLabel = dates.length === 1 ? dates[0] : `${dates[dates.length - 1]}_to_${dates[0]}`;
+    const chanPart  = (channelSet && channelSet.size) ? `_${[...channelSet].join("-")}` : "";
+    const filename  = `order-lines_${client}_${dateLabel}${chanPart}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buf);
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err.message || err) });
   }

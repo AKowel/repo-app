@@ -32,10 +32,30 @@
         </select>
       </div>
       <div class="fg">
-        <div class="fl">Date</div>
-        <select class="fi" id="selDate" style="width:150px">
-          <option value="">Loading…</option>
+        <div class="fl">Report window</div>
+        <select class="fi" id="selMode" style="width:170px">
+          <option value="latest">Latest complete day</option>
+          <option value="last_week">Last week</option>
+          <option value="last_2_weeks">Last 2 weeks</option>
+          <option value="last_month">Last month</option>
+          <option value="last_3_months">Last 3 months</option>
+          <option value="last_6_months">Last 6 months</option>
+          <option value="last_12_months">Last 12 months</option>
+          <option value="date">Specific date</option>
+          <option value="custom">Custom range</option>
         </select>
+      </div>
+      <div class="fg" id="grpDate" style="display:none">
+        <div class="fl">Date</div>
+        <input class="fi" type="date" id="inpDate" />
+      </div>
+      <div class="fg" id="grpRangeStart" style="display:none">
+        <div class="fl">From</div>
+        <input class="fi" type="date" id="inpStart" />
+      </div>
+      <div class="fg" id="grpRangeEnd" style="display:none">
+        <div class="fl">To</div>
+        <input class="fi" type="date" id="inpEnd" />
       </div>
       <div class="fg" style="flex:1;min-width:180px">
         <div class="fl">Search</div>
@@ -54,6 +74,10 @@
         </select>
       </div>
       <button class="btn btn--g btn--sm" id="btnReset" style="align-self:flex-end">Reset</button>
+      <button class="btn btn--g btn--sm" id="btnExport" style="align-self:flex-end;display:inline-flex;align-items:center;gap:5px" title="Export filtered results to Excel">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export .xlsx
+      </button>
     </div>
 
     <!-- Table -->
@@ -94,6 +118,28 @@
 </div>
 </div>
 
+<!-- Export modal -->
+<div class="rmodal-backdrop" id="olExportModalBackdrop" hidden>
+  <div class="rmodal" role="dialog" aria-modal="true" aria-labelledby="olExportModalTitle">
+    <div class="rmodal__head">
+      <div class="rmodal__title" id="olExportModalTitle">Export to Excel</div>
+      <button class="rmodal__close" id="olExportModalClose" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="rmodal__body" id="olExportModalBody"></div>
+    <div class="rmodal__foot">
+      <button class="btn btn--g btn--sm" id="olExportModalCancel">Cancel</button>
+      <button class="btn btn--primary btn--sm" id="olExportModalConfirm" style="display:inline-flex;align-items:center;gap:5px">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download .xlsx
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- Slide-out drawer -->
 <div class="drawer-backdrop" id="drawerBackdrop"></div>
 <div class="drawer" id="transactionDrawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
@@ -113,6 +159,7 @@
   </div>
 </div>
 
+<script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
 <script src="/js/site.js"></script>
 <script src="/js/order-lines.js"></script>
 </body>
