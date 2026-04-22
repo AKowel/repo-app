@@ -1,6 +1,9 @@
 (function () {
   "use strict";
 
+  var latestBinSizeRows = [];
+  var activeBinSizeEdit = "";
+
   document.addEventListener("DOMContentLoaded", function () {
     loadStatus();
     loadSnapshotSummary();
@@ -111,6 +114,7 @@
     var el = document.getElementById("binSizeTable");
     var rows = data.rows || [];
     var summary = data.summary || {};
+    latestBinSizeRows = rows;
 
     if (!rows.length) {
       el.innerHTML = "<div class='empty-state'><div class='empty-state__title'>No active bin sizes found</div><div class='empty-state__desc'>The latest BINLOC snapshot has no active locations for this client.</div></div>";
@@ -123,6 +127,7 @@
     html += "<span class='chip " + (summary.missing_active_bin_size_count ? "chip--warning" : "chip--success") + "'>Missing " + fmtInt(summary.missing_active_bin_size_count) + "</span>";
     html += "<span class='chip'>Definitions " + fmtInt(summary.configured_bin_size_count) + "</span>";
     html += "</div>";
+    html += "<div id='binSizeEditor' style='display:none'></div>";
 
     html += "<div class='table-wrap'><table class='data-table'><thead><tr>";
     html += "<th>Bin Size</th><th>Status</th><th>Active Locations</th><th>Height mm</th><th>Width mm</th><th>Depth mm</th><th>Volume mm3</th><th>Usable 80%</th><th>Examples</th>";
@@ -133,7 +138,11 @@
         ? "<span class='chip chip--success'>Sized</span>"
         : "<span class='chip chip--warning'>Needs size</span>";
       html += "<tr>";
-      html += "<td class='m'><strong>" + esc(row.label || row.bin_size || "Unspecified") + "</strong></td>";
+      if (row.bin_size) {
+        html += "<td class='m js-edit-bin-size' data-bin-size='" + attr(row.bin_size) + "' style='cursor:pointer;color:var(--accent)' title='Edit bin size dimensions'><strong>" + esc(row.label || row.bin_size) + "</strong></td>";
+      } else {
+        html += "<td class='m'><strong>" + esc(row.label || "Unspecified") + "</strong></td>";
+      }
       html += "<td>" + status + "</td>";
       html += "<td>" + fmtInt(row.location_count) + "</td>";
       html += "<td>" + fmtMaybe(row.height_mm) + "</td>";
@@ -147,6 +156,94 @@
 
     html += "</tbody></table></div>";
     el.innerHTML = html;
+    bindBinSizeEditors(el);
+  }
+
+  function bindBinSizeEditors(container) {
+    Array.prototype.forEach.call(container.querySelectorAll(".js-edit-bin-size"), function (cell) {
+      cell.addEventListener("click", function () {
+        openBinSizeEditor(cell.getAttribute("data-bin-size"));
+      });
+    });
+  }
+
+  window.openBinSizeEditor = openBinSizeEditor;
+  function openBinSizeEditor(binSize) {
+    var code = String(binSize || "").trim().toUpperCase();
+    if (!code) return;
+
+    var row = latestBinSizeRows.find(function (entry) {
+      return String(entry.bin_size || "").trim().toUpperCase() === code;
+    });
+    if (!row) return;
+
+    activeBinSizeEdit = code;
+    var editor = document.getElementById("binSizeEditor");
+    if (!editor) return;
+
+    editor.style.display = "block";
+    editor.innerHTML =
+      "<form id='binSizeEditForm' style='display:grid;grid-template-columns:minmax(110px,1fr) repeat(3,minmax(100px,130px)) auto auto;gap:8px;align-items:end;padding:10px;border-bottom:1px solid var(--border);background:var(--surface-2)'>" +
+        "<div><div class='fl'>Bin Size</div><div class='m' style='font-weight:800'>" + esc(code) + "</div></div>" +
+        editInput("Height mm", "binSizeHeight", row.height_mm) +
+        editInput("Width mm", "binSizeWidth", row.width_mm) +
+        editInput("Depth mm", "binSizeDepth", row.depth_mm) +
+        "<button class='btn btn--primary btn--sm' type='submit'>Save</button>" +
+        "<button class='btn btn--g btn--sm' type='button' onclick='closeBinSizeEditor()'>Cancel</button>" +
+        "<div id='binSizeEditMsg' style='grid-column:1 / -1'></div>" +
+      "</form>";
+
+    document.getElementById("binSizeEditForm").addEventListener("submit", function (event) {
+      event.preventDefault();
+      saveBinSizeEdit();
+    });
+    document.getElementById("binSizeHeight").focus();
+  }
+
+  window.closeBinSizeEditor = function () {
+    activeBinSizeEdit = "";
+    var editor = document.getElementById("binSizeEditor");
+    if (editor) {
+      editor.style.display = "none";
+      editor.innerHTML = "";
+    }
+  };
+
+  window.saveBinSizeEdit = function () {
+    var code = activeBinSizeEdit;
+    var msg = document.getElementById("binSizeEditMsg");
+    var height = Number(document.getElementById("binSizeHeight").value);
+    var width = Number(document.getElementById("binSizeWidth").value);
+    var depth = Number(document.getElementById("binSizeDepth").value);
+
+    if (!(height > 0) || !(width > 0) || !(depth > 0)) {
+      if (msg) msg.innerHTML = "<div class='alert alert--error' style='margin:0'>Height, width and depth must be positive mm values.</div>";
+      return;
+    }
+
+    if (msg) msg.innerHTML = "<div class='loading-row' style='justify-content:flex-start;padding:0'><div class='spinner'></div> Saving...</div>";
+
+    fetch("/api/admin/bin-sizes/" + encodeURIComponent(code), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ height: height, width: width, depth: depth }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) {
+          if (msg) msg.innerHTML = "<div class='alert alert--error' style='margin:0'>" + esc(data.error || "Save failed") + "</div>";
+          return;
+        }
+        activeBinSizeEdit = "";
+        loadBinSizes();
+      })
+      .catch(function (err) {
+        if (msg) msg.innerHTML = "<div class='alert alert--error' style='margin:0'>" + esc(err.message) + "</div>";
+      });
+  };
+
+  function editInput(label, id, value) {
+    return "<label class='fg' style='margin:0'><div class='fl'>" + esc(label) + "</div><input class='fi' id='" + attr(id) + "' type='number' min='1' step='1' value='" + attr(value || "") + "' /></label>";
   }
 
   // Snapshot debugger
@@ -213,6 +310,10 @@
     if (value === null || value === undefined || value === "") return "&mdash;";
     var num = Number(value);
     return Number.isFinite(num) ? Math.round(num).toLocaleString() : esc(value);
+  }
+
+  function attr(s) {
+    return esc(s).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   function esc(s) {

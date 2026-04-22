@@ -16,9 +16,11 @@ function loadJsonFile(filePath) {
   try { return JSON.parse(fs.readFileSync(filePath, "utf8")); } catch { return null; }
 }
 
-const FANDM_LAYOUT     = loadJsonFile(path.join(ITEMTRACKER_DATA, "fandm-layout-v4.7.json"));
-const LAYOUT_OVERRIDES = loadJsonFile(path.join(ITEMTRACKER_DATA, "layout-overrides.json"));
-const ASSET_VERSION    = String(Date.now());
+const FANDM_LAYOUT_PATH      = path.join(ITEMTRACKER_DATA, "fandm-layout-v4.7.json");
+const LAYOUT_OVERRIDES_PATH  = path.join(ITEMTRACKER_DATA, "layout-overrides.json");
+const FANDM_LAYOUT           = loadJsonFile(FANDM_LAYOUT_PATH);
+let LAYOUT_OVERRIDES         = loadJsonFile(LAYOUT_OVERRIDES_PATH) || {};
+const ASSET_VERSION          = String(Date.now());
 
 const DEFAULT_BIN_SIZES = {
   F2: { height: 310,  width: 650,  depth: 600  },
@@ -95,6 +97,26 @@ function getConfiguredBinSizes() {
     if (code && dims) out[code] = dims;
   }
   return out;
+}
+
+function saveConfiguredBinSize(code, dimensions) {
+  const binSizeCode = normalizeBinSizeCode(code);
+  const dims = normalizeBinSizeDimensions(dimensions);
+  if (!binSizeCode || !dims) return null;
+
+  const latestOverrides = loadJsonFile(LAYOUT_OVERRIDES_PATH) || {};
+  const nextOverrides = {
+    ...latestOverrides,
+    bin_sizes: {
+      ...(latestOverrides.bin_sizes && typeof latestOverrides.bin_sizes === "object" ? latestOverrides.bin_sizes : {}),
+      [binSizeCode]: dims,
+    },
+  };
+
+  fs.mkdirSync(path.dirname(LAYOUT_OVERRIDES_PATH), { recursive: true });
+  fs.writeFileSync(LAYOUT_OVERRIDES_PATH, JSON.stringify(nextOverrides, null, 2), "utf8");
+  LAYOUT_OVERRIDES = nextOverrides;
+  return dims;
 }
 
 function getBinlocLocation(row) {
@@ -2143,6 +2165,34 @@ app.get("/api/admin/bin-sizes", requireAdminApi, async (req, res) => {
 });
 
 // ── API: admin status ─────────────────────────────────────────────────────
+app.put("/api/admin/bin-sizes/:code", requireAdminApi, (req, res) => {
+  const code = normalizeBinSizeCode(req.params.code);
+  if (!code || !/^[A-Z0-9_-]{1,20}$/.test(code)) {
+    return res.status(400).json({ ok: false, error: "Valid bin size code required." });
+  }
+
+  const dimensions = normalizeBinSizeDimensions(req.body || {});
+  if (!dimensions) {
+    return res.status(400).json({ ok: false, error: "Height, width and depth must be positive mm values." });
+  }
+
+  try {
+    const saved = saveConfiguredBinSize(code, dimensions);
+    const volume = saved.height * saved.width * saved.depth;
+    return res.json({
+      ok: true,
+      bin_size: code,
+      height_mm: saved.height,
+      width_mm: saved.width,
+      depth_mm: saved.depth,
+      volume_mm3: volume,
+      usable_volume_mm3: Math.round(volume * 0.8),
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
 app.get("/api/admin/status", requireAdminApi, async (req, res) => {
   const uptime  = process.uptime();
   const cacheEntries = [...service.cache.entries()].map(([key, val]) => ({
