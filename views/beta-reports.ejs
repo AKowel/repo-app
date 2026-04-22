@@ -1,0 +1,133 @@
+<%- include('partials/head', { pageTitle: '(Beta) Reports' }) %>
+<div class="app-shell">
+<%- include('partials/header', { activePage: 'beta-reports' }) %>
+<div class="main">
+<%- include('partials/topbar', { pageLabel: '(Beta) Reports' }) %>
+<div class="pc">
+
+  <div class="phead">
+    <div class="ph">
+      <div>
+        <span class="pt">(Beta) Reports</span>
+        <span class="ps">PC Zone signal lab</span>
+      </div>
+      <div class="ph-chips">
+        <span class="chip" id="bChipClient"></span>
+        <span class="chip" id="bChipRange"></span>
+        <span class="chip" id="bChipCoverage"></span>
+        <span class="chip chip--a" id="bChipQty"></span>
+        <span class="chip" id="bChipPeriods"></span>
+        <span class="chip chip--status" id="bChipStatus"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="padded" style="padding-bottom:0">
+    <div class="card" style="margin-bottom:0;border-bottom:none;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
+      <div class="tb beta-toolbar" style="border-bottom:none">
+        <div class="fg">
+          <div class="fl">Client</div>
+          <select class="fi" id="bSelClient">
+            <% clientChoices.forEach(c => { %>
+              <option value="<%= c.code %>" <%= c.code === selectedClient ? 'selected' : '' %>><%= c.name %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="fg">
+          <div class="fl">Report window</div>
+          <select class="fi" id="bSelMode" style="width:170px">
+            <option value="latest">Latest complete day</option>
+            <option value="last_week">Last week</option>
+            <option value="last_2_weeks">Last 2 weeks</option>
+            <option value="last_month">Last month</option>
+            <option value="last_3_months" selected>Last 3 months</option>
+            <option value="last_6_months">Last 6 months</option>
+            <option value="last_12_months">Last 12 months</option>
+            <option value="date">Specific date</option>
+            <option value="custom">Custom range</option>
+          </select>
+        </div>
+        <div class="fg" id="bGrpDate" style="display:none">
+          <div class="fl">Date</div>
+          <input class="fi" type="date" id="bInpDate" />
+        </div>
+        <div class="fg" id="bGrpRange" style="display:none">
+          <div class="fl">From</div>
+          <input class="fi" type="date" id="bInpStart" />
+        </div>
+        <div class="fg" id="bGrpRangeEnd" style="display:none">
+          <div class="fl">To</div>
+          <input class="fi" type="date" id="bInpEnd" />
+        </div>
+        <div class="fg">
+          <div class="fl">Compare by</div>
+          <select class="fi" id="bSelCompare" style="width:110px">
+            <option value="week" selected>Week</option>
+            <option value="month">Month</option>
+          </select>
+        </div>
+        <div class="fg">
+          <div class="fl">Channels</div>
+          <div class="reports-channel-picker" id="bChannelPicker">
+            <button type="button" class="fi reports-channel-picker__trigger" id="bChannelTrigger">All channels</button>
+            <div class="reports-channel-picker__dropdown" id="bChannelDropdown" hidden></div>
+          </div>
+        </div>
+        <div class="fg">
+          <div class="fl">PC Zone channel base</div>
+          <div class="beta-check-row">
+            <label><input type="checkbox" class="bPcZoneChannelCb" value="C" checked /> Customer Web</label>
+            <label><input type="checkbox" class="bPcZoneChannelCb" value="S" checked /> Store Replen</label>
+          </div>
+        </div>
+        <div class="fg">
+          <div class="fl">Top signals</div>
+          <select class="fi" id="bSelLimit" style="width:70px">
+            <option value="10">10</option>
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <div class="fg" style="align-self:flex-end;padding-bottom:3px">
+          <label class="beta-inline-check">
+            <input type="checkbox" id="bHideGrp147" />
+            Hide group 147
+          </label>
+        </div>
+        <button class="btn btn--primary btn--sm" id="bBtnLoad" style="align-self:flex-end">Reload</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card-edge reports-results-card beta-results-card" style="margin:0 24px;border-radius:0 0 var(--radius-lg) var(--radius-lg);border-left:1px solid var(--border);border-right:1px solid var(--border);border-bottom:1px solid var(--border)">
+    <div class="tabrow" id="bTabs">
+      <button class="tabbtn reports-tab-btn reports-tab-btn--active tabbtn--on" data-tab="overview">Overview</button>
+      <button class="tabbtn reports-tab-btn" data-tab="consistent">Consistent</button>
+      <button class="tabbtn reports-tab-btn" data-tab="temporary">Temporary</button>
+      <button class="tabbtn reports-tab-btn" data-tab="volatility">Volatility</button>
+      <button class="tabbtn reports-tab-btn" data-tab="pc-review">PC Review</button>
+      <button class="tabbtn reports-tab-btn" data-tab="patterns">Patterns</button>
+      <button class="tabbtn reports-tab-btn" data-tab="periods">Periods</button>
+    </div>
+    <div style="flex:1;overflow-y:auto">
+      <div id="bTab-overview"    class="reports-tab-content reports-tab-content--active"></div>
+      <div id="bTab-consistent"  class="reports-tab-content"></div>
+      <div id="bTab-temporary"   class="reports-tab-content"></div>
+      <div id="bTab-volatility"  class="reports-tab-content"></div>
+      <div id="bTab-pc-review"   class="reports-tab-content"></div>
+      <div id="bTab-patterns"    class="reports-tab-content"></div>
+      <div id="bTab-periods"     class="reports-tab-content"></div>
+    </div>
+  </div>
+
+</div>
+</div>
+</div>
+
+<script src="/js/site.js?v=<%= assetVersion %>"></script>
+<link rel="stylesheet" href="/css/reports.css?v=<%= assetVersion %>" />
+<link rel="stylesheet" href="/css/beta-reports.css?v=<%= assetVersion %>" />
+<script src="/js/beta-reports.js?v=<%= assetVersion %>"></script>
+</body>
+</html>
