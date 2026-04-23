@@ -10,7 +10,6 @@ const selClient = () => document.getElementById("eSelClient");
 const selArea = () => document.getElementById("eSelArea");
 const selBinSize = () => document.getElementById("eSelBinSize");
 const inpDate = () => document.getElementById("eInpDate");
-const inpLevelMax = () => document.getElementById("eInpLevelMax");
 const inpSearch = () => document.getElementById("eInpSearch");
 const selLimit = () => document.getElementById("eSelLimit");
 
@@ -68,6 +67,16 @@ function chipStatus(status) {
   return `<span class="empty-status empty-status--${escAttr(statusTone(status))}">${escHtml(statusLabel(status))}</span>`;
 }
 
+function formatLastTransaction(tx) {
+  if (!tx) return "Last transaction: none found";
+  const date = tx.transaction_date || tx.snapshot_date || "";
+  const item = tx.item || "-";
+  const qty = fmt(tx.qty || 0);
+  const order = tx.order_number ? ` · order ${tx.order_number}` : "";
+  const user = tx.picker ? ` · by ${tx.picker}` : "";
+  return `Last transaction: ${date || "-"} · ${item} · qty ${qty}${order}${user}`;
+}
+
 function dateOffsetYmd(offsetDays) {
   const date = new Date();
   date.setDate(date.getDate() + offsetDays);
@@ -88,7 +97,6 @@ function buildLiveQuery() {
   params.set("limit", selLimit().value);
   if (selArea().value) params.set("area", selArea().value);
   if (selBinSize().value) params.set("bin_size", selBinSize().value);
-  if (inpLevelMax().value !== "") params.set("level_max", inpLevelMax().value);
   if (inpSearch().value.trim()) params.set("search", inpSearch().value.trim());
   return params;
 }
@@ -187,6 +195,7 @@ function renderLiveRow(row) {
     <div class="empty-live-row">
       <div>
         <div class="empty-location">${escHtml(row.location)}</div>
+        <div class="empty-last-transaction">${escHtml(formatLastTransaction(row.last_transaction))}</div>
         <div class="empty-muted">${escHtml(row.source_reason || "date matched")} &middot; out ${escHtml(row.last_move_out_date || "-")}</div>
         <div class="empty-muted">${escHtml(row.operating_area || "-")} · ${escHtml(row.bin_size || "-")} · level ${escHtml(row.level || "-")}</div>
       </div>
@@ -206,12 +215,13 @@ function renderTasks() {
     return;
   }
   el.innerHTML = _tasks.map((task) => `
-    <button class="empty-task-card ${_activeTask?.id === task.id ? "empty-task-card--active" : ""}" data-empty-task-id="${escAttr(task.id)}">
+    <div class="empty-task-card ${_activeTask?.id === task.id ? "empty-task-card--active" : ""}" data-empty-task-id="${escAttr(task.id)}" role="button" tabindex="0">
       <span class="empty-task-card__title">${escHtml(task.title)}</span>
       <span class="empty-task-card__meta">${escHtml(task.type === "move_pallets" ? "Move pallets" : "Empty check")} · ${escHtml(task.status)}</span>
       <span class="empty-task-card__counts">${fmt(task.checked_count)} checked · ${fmt(task.pending_count)} pending · ${fmt(task.system_cleared_count)} cleared</span>
       <span class="empty-task-card__assignee">${task.assignee ? `Assigned to ${escHtml(task.assignee.name || task.assignee.email)}` : "Unassigned"}</span>
-    </button>
+      <span class="empty-task-card__open">Open task</span>
+    </div>
   `).join("");
 }
 
@@ -280,15 +290,12 @@ function renderCheckCard(item) {
   const photos = (item.photos || []).map((photo) =>
     `<a class="empty-photo" href="${escAttr(photo.url)}" target="_blank" rel="noreferrer"><img src="${escAttr(photo.url)}" alt="Photo for ${escAttr(item.location)}" /></a>`
   ).join("");
-  const lastTxn = item.last_transaction
-    ? `${item.last_transaction.snapshot_date}: ${item.last_transaction.item || "-"} qty ${fmt(item.last_transaction.qty)} by ${item.last_transaction.picker || "-"}`
-    : "No recent pick transaction found";
-
   return `
     <div class="empty-check-card empty-check-card--${escAttr(statusTone(item.status))}" data-location="${escAttr(item.location)}">
       <div class="empty-check-card__top">
         <div>
           <div class="empty-location">${escHtml(item.location)}</div>
+          <div class="empty-last-transaction">${escHtml(formatLastTransaction(item.last_transaction))}</div>
           <div class="empty-muted">${escHtml(item.operating_area || "-")} · ${escHtml(item.bin_size || "-")} · ${escHtml(item.bin_type || "-")} · level ${escHtml(item.level || "-")}</div>
         </div>
         ${chipStatus(item.status)}
@@ -296,7 +303,7 @@ function renderCheckCard(item) {
       <div class="empty-facts">
         <span>Live qty ${fmt(live.current_qty ?? item.current_qty_at_create)}</span>
         <span>Live SKU ${escHtml(live.item_sku || "-")}</span>
-        <span>${escHtml(lastTxn)}</span>
+        <span>${escHtml(formatLastTransaction(item.last_transaction))}</span>
       </div>
       ${item.system_cleared_reason ? `<div class="empty-system-note">${escHtml(item.system_cleared_reason)}</div>` : ""}
       ${item.note ? `<div class="empty-note">${escHtml(item.note)}</div>` : ""}
@@ -333,15 +340,12 @@ function renderReportRow(item) {
   const photos = (item.photos || []).map((photo) =>
     `<a class="empty-photo" href="${escAttr(photo.url)}" target="_blank" rel="noreferrer"><img src="${escAttr(photo.url)}" alt="Photo for ${escAttr(item.location)}" /></a>`
   ).join("");
-  const lastTxn = item.last_transaction
-    ? `${item.last_transaction.snapshot_date} · ${item.last_transaction.order_number || "-"} · ${item.last_transaction.item || "-"} · qty ${fmt(item.last_transaction.qty)}`
-    : "No recent pick transaction";
   return `
     <div class="empty-report-row">
       <div>
         <div class="empty-location">${escHtml(item.location)}</div>
+        <div class="empty-last-transaction">${escHtml(formatLastTransaction(item.last_transaction))}</div>
         <div class="empty-muted">${escHtml(item.operating_area || "-")} · ${escHtml(item.bin_size || "-")} · ${escHtml(item.bin_type || "-")}</div>
-        <div class="empty-muted">Last transaction: ${escHtml(lastTxn)}</div>
         ${item.note ? `<div class="empty-note">${escHtml(item.note)}</div>` : ""}
       </div>
       <div>${chipStatus(item.status)}</div>
@@ -375,7 +379,6 @@ async function createTaskFromFilters() {
   filters.date = selectedReportDate();
   if (selArea().value) filters.area = selArea().value;
   if (selBinSize().value) filters.bin_size = selBinSize().value;
-  if (inpLevelMax().value !== "") filters.level_max = inpLevelMax().value;
   if (inpSearch().value.trim()) filters.search = inpSearch().value.trim();
   try {
     const created = await apiJson("/api/empty-bin/tasks", {
@@ -466,7 +469,7 @@ document.addEventListener("DOMContentLoaded", () => {
     renderTask();
     renderReport();
   });
-  [inpDate(), selArea(), selBinSize(), inpLevelMax(), selLimit()].forEach((el) => el?.addEventListener("change", loadLive));
+  [inpDate(), selArea(), selBinSize(), selLimit()].forEach((el) => el?.addEventListener("change", loadLive));
   inpSearch().addEventListener("keydown", (event) => {
     if (event.key === "Enter") loadLive();
   });
@@ -491,5 +494,11 @@ document.addEventListener("DOMContentLoaded", () => {
       const card = checkButton.closest("[data-location]");
       if (card) submitCheck(card, checkButton.dataset.checkAction);
     }
+  });
+  document.addEventListener("keydown", (event) => {
+    const taskCard = event.target.closest("[data-empty-task-id]");
+    if (!taskCard || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    loadTask(taskCard.dataset.emptyTaskId).catch((err) => window.RepoApp?.toast?.(err.message, "error"));
   });
 });

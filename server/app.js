@@ -392,8 +392,6 @@ function filterEmptyBinRows(rows, query = {}, { dayContext = null, client = EMPT
   const binSize = normalizeBinSizeCode(query.bin_size || query.binSize);
   const binType = String(query.bin_type || query.binType || "").trim().toUpperCase();
   const search = String(query.search || "").trim().toUpperCase();
-  const levelMax = Number.parseInt(query.level_max || query.levelMax || "19", 10);
-  const hasLevelMax = Number.isFinite(levelMax);
   const targetClient = normalizeClientCode(client || query.client || EMPTY_BIN_CLIENT_CODE);
 
   return (rows || [])
@@ -404,8 +402,6 @@ function filterEmptyBinRows(rows, query = {}, { dayContext = null, client = EMPT
       if (targetClient && rowClient !== targetClient) return false;
       const dayReason = dayContext ? getEmptyBinDateReason(row, dayContext) : "";
       if (dayContext && !dayReason) return false;
-      const levelNum = getLocationLevelNumber(location);
-      if (hasLevelMax && levelNum > levelMax) return false;
       const serialized = serializeEmptyBinLocation(row);
       if (includeAreaFilters && area && serialized.operating_area !== area) return false;
       if (includeAreaFilters && binSize && serialized.bin_size !== binSize) return false;
