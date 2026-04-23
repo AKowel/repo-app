@@ -25,11 +25,15 @@
       <div class="tb empty-bin-toolbar">
         <div class="fg">
           <div class="fl">Client</div>
-          <select class="fi" id="eSelClient">
+          <select class="fi" id="eSelClient" disabled>
             <% clientChoices.forEach(c => { %>
               <option value="<%= c.code %>" <%= c.code === selectedClient ? 'selected' : '' %>><%= c.name %></option>
             <% }) %>
           </select>
+        </div>
+        <div class="fg">
+          <div class="fl">Went empty date</div>
+          <input class="fi" id="eInpDate" type="date" style="width:150px" />
         </div>
         <div class="fg">
           <div class="fl">Area</div>

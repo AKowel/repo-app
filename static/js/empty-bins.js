@@ -9,6 +9,7 @@ let _pollTimer = null;
 const selClient = () => document.getElementById("eSelClient");
 const selArea = () => document.getElementById("eSelArea");
 const selBinSize = () => document.getElementById("eSelBinSize");
+const inpDate = () => document.getElementById("eInpDate");
 const inpLevelMax = () => document.getElementById("eInpLevelMax");
 const inpSearch = () => document.getElementById("eInpSearch");
 const selLimit = () => document.getElementById("eSelLimit");
@@ -67,9 +68,23 @@ function chipStatus(status) {
   return `<span class="empty-status empty-status--${escAttr(statusTone(status))}">${escHtml(statusLabel(status))}</span>`;
 }
 
+function dateOffsetYmd(offsetDays) {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function selectedReportDate() {
+  return inpDate()?.value || dateOffsetYmd(-1);
+}
+
 function buildLiveQuery() {
   const params = new URLSearchParams();
   params.set("client", selClient().value);
+  params.set("date", selectedReportDate());
   params.set("limit", selLimit().value);
   if (selArea().value) params.set("area", selArea().value);
   if (selBinSize().value) params.set("bin_size", selBinSize().value);
@@ -108,7 +123,7 @@ async function loadLive() {
     updateSelectOptions(selArea(), data.meta?.filters?.areas || [], "area", "All areas");
     updateSelectOptions(selBinSize(), data.meta?.filters?.bin_sizes || [], "bin_size", "All sizes");
     renderLive();
-    setChip("eChipLive", `${fmt(data.summary.empty_count)} live empties`);
+    setChip("eChipLive", `${fmt(data.summary.empty_count)} empties on ${data.meta?.report_date || selectedReportDate()}`);
     setChip("eChipStatus", "Live loaded");
   } catch (err) {
     document.getElementById("eTab-live").innerHTML = errorHtml(err.message);
@@ -151,15 +166,17 @@ function startPolling() {
 function renderLive() {
   const rows = _live?.rows || [];
   const meta = _live?.meta || {};
+  const daySource = meta.day_source || {};
   const html = `
     <div class="empty-live-head">
       <div>
-        <div class="empty-title">Live empty locations</div>
-        <div class="empty-muted">Snapshot ${escHtml(meta.snapshot_date || "latest")} · showing ${fmt(rows.length)} returned locations</div>
+        <div class="empty-title">FANDMKET empty locations for ${escHtml(meta.report_date || selectedReportDate())}</div>
+        <div class="empty-muted">BINLOC ${escHtml(meta.snapshot_date || "latest")} &middot; synced ${escHtml(meta.source_synced_at || "-")} &middot; ${fmt(daySource.pick_transaction_locations || 0)} same-day pick locations</div>
       </div>
       <button class="btn btn--primary btn--sm" id="eBtnCreateTaskInline">Create task from this view</button>
     </div>
-    ${rows.length ? `<div class="empty-live-list">${rows.map(renderLiveRow).join("")}</div>` : emptyState("No live empty locations matched the current filters.")}
+    ${daySource.pick_transaction_error ? `<div class="empty-system-banner">Pick transaction snapshot was not available: ${escHtml(daySource.pick_transaction_error)}. BINLOC last-move-out dates are still being used.</div>` : ""}
+    ${rows.length ? `<div class="empty-live-list">${rows.map(renderLiveRow).join("")}</div>` : emptyState("No FANDMKET locations that went empty on this date are still empty in live BINLOC.")}
   `;
   document.getElementById("eTab-live").innerHTML = html;
   document.getElementById("eBtnCreateTaskInline")?.addEventListener("click", createTaskFromFilters);
@@ -170,10 +187,12 @@ function renderLiveRow(row) {
     <div class="empty-live-row">
       <div>
         <div class="empty-location">${escHtml(row.location)}</div>
+        <div class="empty-muted">${escHtml(row.source_reason || "date matched")} &middot; out ${escHtml(row.last_move_out_date || "-")}</div>
         <div class="empty-muted">${escHtml(row.operating_area || "-")} · ${escHtml(row.bin_size || "-")} · level ${escHtml(row.level || "-")}</div>
       </div>
       <div class="empty-live-row__meta">
         <span>${escHtml(row.bin_type || "-")}</span>
+        <span>Out ${escHtml(row.last_move_out_date || "-")}</span>
         <span>Max ${fmt(row.max_bin_qty)}</span>
       </div>
     </div>
@@ -353,6 +372,7 @@ function switchTab(name) {
 async function createTaskFromFilters() {
   setChip("eChipStatus", "Creating task...");
   const filters = {};
+  filters.date = selectedReportDate();
   if (selArea().value) filters.area = selArea().value;
   if (selBinSize().value) filters.bin_size = selBinSize().value;
   if (inpLevelMax().value !== "") filters.level_max = inpLevelMax().value;
@@ -363,7 +383,8 @@ async function createTaskFromFilters() {
       body: JSON.stringify({
         client: selClient().value,
         type: "empty_check",
-        title: `Daily empty bin check ${new Date().toISOString().slice(0, 10)}`,
+        title: `Daily empty bin check ${selectedReportDate()}`,
+        report_date: selectedReportDate(),
         filters,
         limit: selLimit().value,
       }),
@@ -429,6 +450,7 @@ async function submitCheck(card, action) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  if (inpDate() && !inpDate().value) inpDate().value = dateOffsetYmd(-1);
   setChip("eChipClient", selClient().options[selClient().selectedIndex]?.text || selClient().value);
   loadLive();
   loadTasks();
@@ -444,7 +466,7 @@ document.addEventListener("DOMContentLoaded", () => {
     renderTask();
     renderReport();
   });
-  [selArea(), selBinSize(), inpLevelMax(), selLimit()].forEach((el) => el.addEventListener("change", loadLive));
+  [inpDate(), selArea(), selBinSize(), inpLevelMax(), selLimit()].forEach((el) => el?.addEventListener("change", loadLive));
   inpSearch().addEventListener("keydown", (event) => {
     if (event.key === "Enter") loadLive();
   });
