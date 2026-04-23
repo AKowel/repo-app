@@ -528,7 +528,7 @@ body {
     height: var(--mobile-nav-height);
     padding: 6px 8px;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 4px;
     overflow: visible;
   }
@@ -540,7 +540,7 @@ body {
     min-width: 0;
     padding: 6px 4px;
     border-radius: 7px;
-    font-size: 9px;
+    font-size: 8px;
     line-height: 1.1;
     text-align: center;
   }

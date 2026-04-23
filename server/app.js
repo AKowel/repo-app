@@ -8,6 +8,7 @@ const session = require("express-session");
 const { config }          = require("./config");
 const { formatDateYMD }   = require("./helpers");
 const { SnapshotService } = require("./snapshotService");
+const { EmptyBinTaskStore, normalizeLocation: normalizeEmptyBinLocation } = require("./emptyBinStore");
 
 // ── Layout files (itemtracker data dir) ──────────────────────────────────────
 const ITEMTRACKER_DATA = path.join(__dirname, "..", "..", "itemtracker", "server", "data");
@@ -186,6 +187,210 @@ function getBinlocBinSize(row) {
 
 function getBinlocRowClientCode(row) {
   return normalizeClientCode(row?.BLCCOD || row?.client_code || row?.Client);
+}
+
+function getBinlocCurrentQty(row) {
+  return Number(row?.BLQTY || row?.qty || row?.["Item Qty"] || 0);
+}
+
+function getBinlocAvailableQty(row) {
+  return Number(row?.CALCQTY || row?.available_qty || row?.["Available Qty"] || 0);
+}
+
+function isActiveBinlocRow(row) {
+  const status = String(row?.BLSTS || row?.status || row?.Status || "Y").trim().toUpperCase();
+  return status === "Y";
+}
+
+function isEmptyBinlocRow(row) {
+  if (!isActiveBinlocRow(row)) return false;
+  const currentQty = Number(row?.BLQTY || row?.qty || row?.["Item Qty"] || 0);
+  const adjustedQty = Number(row?.BLADJQ || row?.item_adjust || row?.["Item Adjust"] || 0);
+  const pickedQty = Number(row?.BLPICQ || row?.item_picked || row?.["Item Picked"] || 0);
+  const kitQty = Number(row?.BLKITQ || 0);
+  return currentQty <= 0 && adjustedQty <= 0 && pickedQty <= 0 && kitQty <= 0;
+}
+
+function getBinlocItemSku(row) {
+  return String(row?.BLITEM || row?.sku || row?.["Item SKU"] || "").trim().toUpperCase();
+}
+
+function getBinlocItemDescription(row) {
+  return String(row?.["Item Description"] || row?.item_description || "").trim();
+}
+
+function serializeEmptyBinLocation(row) {
+  const location = getBinlocLocation(row);
+  const parts = parseLocationCode(location);
+  const levelNum = getLocationLevelNumber(location);
+  return {
+    location,
+    aisle_prefix: parts.aisle_prefix,
+    bay: parts.bay,
+    level: parts.level,
+    level_num: levelNum,
+    operating_area: normalizeOperatingArea(row.BLWOPA || row.operating_area || row["Op. Area"]),
+    bin_size: getBinlocBinSize(row),
+    bin_type: normalizeBinType(row.BLBKPK || row.bin_type || row["Pick / Bulk"]),
+    client_code: getBinlocRowClientCode(row),
+    item_sku: getBinlocItemSku(row),
+    item_description: getBinlocItemDescription(row),
+    current_qty: getBinlocCurrentQty(row),
+    available_qty: getBinlocAvailableQty(row),
+    max_bin_qty: Number(row.BLMAXQ || row.max_bin_qty || 0),
+    checked_digit: String(row.BLCHKD || row["Check Digit"] || "").trim(),
+    status: String(row.BLSTS || row.Status || "Y").trim().toUpperCase(),
+    live_empty: isEmptyBinlocRow(row),
+  };
+}
+
+function filterEmptyBinRows(rows, query = {}) {
+  const area = normalizeOperatingArea(query.area);
+  const binSize = normalizeBinSizeCode(query.bin_size || query.binSize);
+  const binType = String(query.bin_type || query.binType || "").trim().toUpperCase();
+  const search = String(query.search || "").trim().toUpperCase();
+  const levelMax = Number.parseInt(query.level_max || query.levelMax || "19", 10);
+  const hasLevelMax = Number.isFinite(levelMax);
+
+  return (rows || [])
+    .filter(row => {
+      const location = getBinlocLocation(row);
+      if (!location || !isEmptyBinlocRow(row)) return false;
+      const levelNum = getLocationLevelNumber(location);
+      if (hasLevelMax && levelNum > levelMax) return false;
+      const serialized = serializeEmptyBinLocation(row);
+      if (area && serialized.operating_area !== area) return false;
+      if (binSize && serialized.bin_size !== binSize) return false;
+      if (binType && String(serialized.bin_type || "").toUpperCase() !== binType) return false;
+      if (search && !`${serialized.location} ${serialized.operating_area} ${serialized.bin_size} ${serialized.bin_type}`.toUpperCase().includes(search)) return false;
+      return true;
+    })
+    .map(serializeEmptyBinLocation)
+    .sort((a, b) => a.location.localeCompare(b.location));
+}
+
+function summarizeEmptyBinTask(task) {
+  const items = task?.items || [];
+  const pending = items.filter(item => item.status === "pending").length;
+  const systemCleared = items.filter(item => item.status === "system_cleared").length;
+  const checked = items.filter(item => item.status && item.status !== "pending" && item.status !== "system_cleared").length;
+  const photos = items.reduce((sum, item) => sum + ((item.photos || []).length), 0);
+  return {
+    id: task.id,
+    client: task.client,
+    type: task.type,
+    title: task.title,
+    status: task.status,
+    assignee: task.assignee,
+    source_task_id: task.source_task_id || "",
+    created_at: task.created_at,
+    updated_at: task.updated_at,
+    completed_at: task.completed_at || "",
+    total_count: items.length,
+    pending_count: pending,
+    checked_count: checked,
+    system_cleared_count: systemCleared,
+    photo_count: photos,
+  };
+}
+
+async function loadEmptyBinLiveIndex(client) {
+  const { rows = [], meta = null, fromCache = false } = await service.loadSnapshot("binloc", client, null);
+  const liveByLocation = new Map();
+  const areas = new Map();
+  const binSizes = new Map();
+  const binTypes = new Map();
+
+  for (const row of rows) {
+    const location = getBinlocLocation(row);
+    if (!location) continue;
+    const serialized = serializeEmptyBinLocation(row);
+    liveByLocation.set(location, serialized);
+    if (serialized.live_empty) {
+      if (serialized.operating_area) areas.set(serialized.operating_area, (areas.get(serialized.operating_area) || 0) + 1);
+      if (serialized.bin_size) binSizes.set(serialized.bin_size, (binSizes.get(serialized.bin_size) || 0) + 1);
+      if (serialized.bin_type) binTypes.set(serialized.bin_type, (binTypes.get(serialized.bin_type) || 0) + 1);
+    }
+  }
+
+  const toOptions = (map, labelKey) => [...map.entries()]
+    .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
+    .map(([value, count]) => ({ [labelKey]: value, count }));
+
+  return {
+    rows,
+    meta,
+    fromCache,
+    liveByLocation,
+    filters: {
+      areas: toOptions(areas, "area"),
+      bin_sizes: toOptions(binSizes, "bin_size"),
+      bin_types: toOptions(binTypes, "bin_type"),
+    },
+  };
+}
+
+async function findRecentLocationTransactions(client, locations, maxDates = 14) {
+  const locSet = new Set([...locations].map(normalizeEmptyBinLocation).filter(Boolean));
+  const found = new Map();
+  if (!locSet.size) return found;
+  const trxDates = (await service.listSnapshotDates("pick_transactions", client).catch(() => []))
+    .filter(Boolean)
+    .sort()
+    .reverse();
+  for (const trxDate of trxDates.slice(0, maxDates)) {
+    const { rows = [] } = await service.loadSnapshot("pick_transactions", client, trxDate).catch(() => ({ rows: [] }));
+    for (const row of rows) {
+      const loc = normalizeEmptyBinLocation(row.BABINL);
+      if (!locSet.has(loc) || found.has(loc)) continue;
+      found.set(loc, {
+        snapshot_date: trxDate,
+        order_number: String(row.BTORDN || "").trim(),
+        client_code: String(row.BTCCDE || "").trim(),
+        shipment: String(row.BTSHPN || "").trim(),
+        picker: String(row.BTPICU || "").trim(),
+        pick_date: String(row.BTPICD || "").trim(),
+        qty: Number(row.BAQTY || 0),
+        item: String(row.BAITEM || "").trim().toUpperCase(),
+        location: loc,
+      });
+      if (found.size >= locSet.size) return found;
+    }
+  }
+  return found;
+}
+
+async function refreshEmptyBinTask(taskId) {
+  const task = emptyBinTaskStore.getTask(taskId);
+  if (!task) return null;
+  const live = await loadEmptyBinLiveIndex(task.client || DEFAULT_CLIENT);
+  const updatedTask = emptyBinTaskStore.updateTask(taskId, (existingTask) => {
+    for (const item of (existingTask.items || [])) {
+      const current = live.liveByLocation.get(normalizeEmptyBinLocation(item.location)) || null;
+      item.live = current;
+      if (item.status === "pending" && current && !current.live_empty) {
+        item.status = "system_cleared";
+        item.result = "system_cleared";
+        item.system_cleared_at = new Date().toISOString();
+        item.system_cleared_reason = current.current_qty > 0 || current.item_sku
+          ? "BINLOC now shows stock in this location."
+          : "BINLOC no longer shows this as an empty active location.";
+        item.history = item.history || [];
+        item.history.push({
+          at: item.system_cleared_at,
+          action: "system_cleared",
+          reason: item.system_cleared_reason,
+          live: current,
+        });
+      }
+    }
+    return existingTask;
+  });
+  const trxMap = await findRecentLocationTransactions(task.client || DEFAULT_CLIENT, (updatedTask.items || []).map(item => item.location), 14);
+  for (const item of (updatedTask.items || [])) {
+    item.last_transaction = trxMap.get(normalizeEmptyBinLocation(item.location)) || item.last_transaction || null;
+  }
+  return { task: updatedTask, live_meta: live.meta, live_filters: live.filters };
 }
 
 function shouldIncludeBinlocHeatmapRow(row, clientCode, pickMap) {
@@ -543,6 +748,9 @@ const service = new SnapshotService({
   adminEmail:     config.pocketbaseAdminEmail,
   adminPassword:  config.pocketbaseAdminPassword,
 });
+const emptyBinTaskStore = new EmptyBinTaskStore({
+  dataDir: path.join(__dirname, "data"),
+});
 
 // ── Express app ───────────────────────────────────────────────────────────
 const app = express();
@@ -552,8 +760,8 @@ if (config.trustProxy) app.set("trust proxy", 1);
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "..", "views"));
 
-app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
+app.use(express.urlencoded({ extended: false, limit: "25mb" }));
+app.use(express.json({ limit: "25mb" }));
 
 app.use(
   session({
@@ -1523,6 +1731,11 @@ app.get("/reports", requireAdminPage, (req, res) => {
 app.get("/beta-reports", requireAdminPage, (req, res) => {
   const { clientChoices, selectedClient } = clientChoicesWithSelected(req);
   res.render("beta-reports", { clientChoices, selectedClient });
+});
+
+app.get("/empty-bins", requireAdminPage, (req, res) => {
+  const { clientChoices, selectedClient } = clientChoicesWithSelected(req);
+  res.render("empty-bins", { clientChoices, selectedClient });
 });
 
 // ── API: reports data ─────────────────────────────────────────────────────
@@ -3375,6 +3588,185 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err.message || err) });
   }
+});
+
+app.get("/api/empty-bin/live", requireAdminApi, async (req, res) => {
+  const client = normalizeClientCode(req.query.client || DEFAULT_CLIENT);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 25), 1000);
+  try {
+    const live = await loadEmptyBinLiveIndex(client);
+    const filteredRows = filterEmptyBinRows(live.rows, req.query);
+    return res.json({
+      ok: true,
+      meta: {
+        client,
+        snapshot_date: live.meta?.snapshot_date || "",
+        row_count: live.rows.length,
+        from_cache: live.fromCache,
+        filters: live.filters,
+      },
+      summary: {
+        empty_count: filteredRows.length,
+        returned_count: Math.min(filteredRows.length, limit),
+      },
+      rows: filteredRows.slice(0, limit),
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.get("/api/empty-bin/tasks", requireAdminApi, (req, res) => {
+  const client = normalizeClientCode(req.query.client || "");
+  const tasks = emptyBinTaskStore.listTasks({ client }).map(summarizeEmptyBinTask);
+  return res.json({ ok: true, tasks });
+});
+
+app.post("/api/empty-bin/tasks", requireAdminApi, async (req, res) => {
+  const client = normalizeClientCode(req.body?.client || DEFAULT_CLIENT);
+  const type = req.body?.type === "move_pallets" ? "move_pallets" : "empty_check";
+  const title = String(req.body?.title || "").trim();
+  const limit = Math.min(Math.max(parseInt(req.body?.limit, 10) || 200, 25), 1000);
+  const filters = req.body?.filters && typeof req.body.filters === "object" ? req.body.filters : {};
+  const requestedLocations = Array.isArray(req.body?.locations)
+    ? req.body.locations.map(normalizeEmptyBinLocation).filter(Boolean)
+    : [];
+
+  try {
+    const live = await loadEmptyBinLiveIndex(client);
+    let rows;
+    if (requestedLocations.length) {
+      rows = requestedLocations
+        .map(location => live.liveByLocation.get(location))
+        .filter(row => row && row.live_empty);
+    } else {
+      rows = filterEmptyBinRows(live.rows, filters).slice(0, limit);
+    }
+
+    if (!rows.length) {
+      return res.status(400).json({ ok: false, error: "No live empty locations matched this task." });
+    }
+
+    const task = emptyBinTaskStore.createTask({
+      client,
+      type,
+      title,
+      createdBy: req.currentUser,
+      filters: requestedLocations.length ? { selected_locations: requestedLocations } : filters,
+      snapshotMeta: live.meta || {},
+      items: rows,
+    });
+    return res.json({ ok: true, task: summarizeEmptyBinTask(task), full_task: task });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.get("/api/empty-bin/tasks/:taskId", requireAdminApi, async (req, res) => {
+  try {
+    const refreshed = await refreshEmptyBinTask(req.params.taskId);
+    if (!refreshed) return res.status(404).json({ ok: false, error: "Task not found." });
+    return res.json({
+      ok: true,
+      task: refreshed.task,
+      summary: summarizeEmptyBinTask(refreshed.task),
+      live_meta: refreshed.live_meta,
+      live_filters: refreshed.live_filters,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.post("/api/empty-bin/tasks/:taskId/assign", requireAdminApi, (req, res) => {
+  const task = emptyBinTaskStore.assignTask(req.params.taskId, req.currentUser);
+  if (!task) return res.status(404).json({ ok: false, error: "Task not found." });
+  return res.json({ ok: true, task, summary: summarizeEmptyBinTask(task) });
+});
+
+app.post("/api/empty-bin/tasks/:taskId/drop", requireAdminApi, (req, res) => {
+  const task = emptyBinTaskStore.dropTask(req.params.taskId, req.currentUser);
+  if (!task) return res.status(404).json({ ok: false, error: "Task not found." });
+  return res.json({ ok: true, task, summary: summarizeEmptyBinTask(task) });
+});
+
+app.post("/api/empty-bin/tasks/:taskId/complete", requireAdminApi, (req, res) => {
+  const task = emptyBinTaskStore.completeTask(req.params.taskId, req.currentUser);
+  if (!task) return res.status(404).json({ ok: false, error: "Task not found." });
+  return res.json({ ok: true, task, summary: summarizeEmptyBinTask(task) });
+});
+
+app.post("/api/empty-bin/tasks/:taskId/create-followup", requireAdminApi, async (req, res) => {
+  try {
+    const refreshed = await refreshEmptyBinTask(req.params.taskId);
+    if (!refreshed) return res.status(404).json({ ok: false, error: "Task not found." });
+    const task = refreshed.task;
+    const items = (task.items || [])
+      .filter(item => ["checked_empty", "empty_pallet", "move_required"].includes(item.status))
+      .filter(item => item.live?.live_empty !== false)
+      .map(item => item.live || item);
+    if (!items.length) {
+      return res.status(400).json({ ok: false, error: "No checked empty locations still need a follow-up move task." });
+    }
+    const followup = emptyBinTaskStore.createTask({
+      client: task.client,
+      type: "move_pallets",
+      title: req.body?.title || `Bring pallets for ${task.title}`,
+      createdBy: req.currentUser,
+      sourceTaskId: task.id,
+      filters: { source_task_id: task.id },
+      snapshotMeta: refreshed.live_meta || {},
+      items,
+    });
+    return res.json({ ok: true, task: summarizeEmptyBinTask(followup), full_task: followup });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.post("/api/empty-bin/tasks/:taskId/locations/:location/check", requireAdminApi, (req, res) => {
+  const action = String(req.body?.action || req.body?.status || "").trim();
+  const statusMap = {
+    empty: "checked_empty",
+    checked_empty: "checked_empty",
+    not_empty: "checked_not_empty",
+    checked_not_empty: "checked_not_empty",
+    empty_pallet: "empty_pallet",
+    needs_move: "move_required",
+    move_required: "move_required",
+    moved: "moved",
+    skipped: "skipped",
+    cannot_complete: "cannot_complete",
+  };
+  const status = statusMap[action];
+  if (!status) return res.status(400).json({ ok: false, error: "Valid check action required." });
+
+  try {
+    let task = emptyBinTaskStore.updateLocation(req.params.taskId, req.params.location, {
+      status,
+      result: status,
+      note: req.body?.note,
+      user: req.currentUser,
+    });
+    if (!task) return res.status(404).json({ ok: false, error: "Task or location not found." });
+
+    let photo = null;
+    if (req.body?.image_data_url) {
+      const saved = emptyBinTaskStore.savePhotoFromDataUrl(req.params.taskId, req.params.location, req.body.image_data_url, req.currentUser);
+      task = saved.task || task;
+      photo = saved.photo;
+    }
+
+    return res.json({ ok: true, task, summary: summarizeEmptyBinTask(task), photo });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.get("/api/empty-bin/photos/:fileName", requireAdminPage, (req, res) => {
+  const filePath = emptyBinTaskStore.photoPath(req.params.fileName);
+  if (!fs.existsSync(filePath)) return res.status(404).send("Not found");
+  return res.sendFile(filePath);
 });
 
 // Admin page

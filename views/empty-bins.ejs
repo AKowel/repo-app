@@ -1,0 +1,105 @@
+<%- include('partials/head', { pageTitle: 'Empty Bin Tasks' }) %>
+<div class="app-shell">
+<%- include('partials/header', { activePage: 'empty-bins' }) %>
+<div class="main">
+<%- include('partials/topbar', { pageLabel: 'Empty Bin Tasks' }) %>
+<div class="pc pc-scroll">
+
+  <div class="phead">
+    <div class="ph">
+      <div>
+        <span class="pt">Empty Bin Tasks</span>
+        <span class="ps">Daily empty-bin checks, photos, and follow-up pallet moves</span>
+      </div>
+      <div class="ph-chips">
+        <span class="chip" id="eChipClient"></span>
+        <span class="chip chip--a" id="eChipLive"></span>
+        <span class="chip" id="eChipTasks"></span>
+        <span class="chip chip--status" id="eChipStatus"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="padded">
+    <div class="card">
+      <div class="tb empty-bin-toolbar">
+        <div class="fg">
+          <div class="fl">Client</div>
+          <select class="fi" id="eSelClient">
+            <% clientChoices.forEach(c => { %>
+              <option value="<%= c.code %>" <%= c.code === selectedClient ? 'selected' : '' %>><%= c.name %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="fg">
+          <div class="fl">Area</div>
+          <select class="fi" id="eSelArea" style="width:110px">
+            <option value="">All areas</option>
+          </select>
+        </div>
+        <div class="fg">
+          <div class="fl">Bin size</div>
+          <select class="fi" id="eSelBinSize" style="width:110px">
+            <option value="">All sizes</option>
+          </select>
+        </div>
+        <div class="fg">
+          <div class="fl">Level max</div>
+          <input class="fi" id="eInpLevelMax" type="number" min="0" max="99" value="19" style="width:78px" />
+        </div>
+        <div class="fg">
+          <div class="fl">Search</div>
+          <input class="fi" id="eInpSearch" placeholder="Location / area" style="width:170px" />
+        </div>
+        <div class="fg">
+          <div class="fl">Limit</div>
+          <select class="fi" id="eSelLimit" style="width:85px">
+            <option value="100">100</option>
+            <option value="200" selected>200</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+          </select>
+        </div>
+        <button class="btn btn--sm" id="eBtnLoadLive" style="align-self:flex-end">Refresh</button>
+        <button class="btn btn--primary btn--sm" id="eBtnCreateTask" style="align-self:flex-end">Create check task</button>
+      </div>
+    </div>
+
+    <div class="empty-bin-grid">
+      <div class="empty-bin-panel">
+        <div class="card">
+          <div class="card__head">
+            <div>
+              <div class="card__title">Tasks</div>
+              <div class="card__subtitle" id="eTaskSubtitle">Available and in-progress work</div>
+            </div>
+            <button class="btn btn--sm" id="eBtnLoadTasks">Reload</button>
+          </div>
+          <div class="empty-task-list" id="eTaskList"></div>
+        </div>
+      </div>
+
+      <div class="empty-bin-panel empty-bin-panel--main">
+        <div class="card">
+          <div class="tabrow" id="eTabs">
+            <button class="tabbtn reports-tab-btn reports-tab-btn--active tabbtn--on" data-tab="live">Live Empty</button>
+            <button class="tabbtn reports-tab-btn" data-tab="task">Task Check</button>
+            <button class="tabbtn reports-tab-btn" data-tab="report">Completed Report</button>
+          </div>
+          <div id="eTab-live" class="reports-tab-content reports-tab-content--active"></div>
+          <div id="eTab-task" class="reports-tab-content"></div>
+          <div id="eTab-report" class="reports-tab-content"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+</div>
+
+<script src="/js/site.js?v=<%= assetVersion %>"></script>
+<link rel="stylesheet" href="/css/empty-bins.css?v=<%= assetVersion %>" />
+<script src="/js/empty-bins.js?v=<%= assetVersion %>"></script>
+</body>
+</html>
