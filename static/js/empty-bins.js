@@ -239,13 +239,13 @@ function renderTasks() {
     return;
   }
   el.innerHTML = _tasks.map((task) => `
-    <div class="empty-task-card ${_activeTask?.id === task.id ? "empty-task-card--active" : ""}" data-empty-task-id="${escAttr(task.id)}" role="button" tabindex="0">
+    <a class="empty-task-card ${_activeTask?.id === task.id ? "empty-task-card--active" : ""}" data-empty-task-id="${escAttr(task.id)}" href="/empty-bins/tasks/${encodeURIComponent(task.id)}">
       <span class="empty-task-card__title">${escHtml(task.title)}</span>
       <span class="empty-task-card__meta">${escHtml(task.type === "move_pallets" ? "Move pallets" : "Empty check")} · ${escHtml(task.status)}</span>
       <span class="empty-task-card__counts">${fmt(task.checked_count)} checked · ${fmt(task.pending_count)} pending · ${fmt(task.system_cleared_count)} cleared</span>
       <span class="empty-task-card__assignee">${task.assignee ? `Assigned to ${escHtml(task.assignee.name || task.assignee.email)}` : "Unassigned"}</span>
       <span class="empty-task-card__open">Start checking</span>
-    </div>
+    </a>
   `).join("");
 }
 
@@ -417,9 +417,7 @@ async function createTaskFromFilters() {
       }),
     });
     await apiJson(`/api/empty-bin/tasks/${encodeURIComponent(created.task.id)}/assign`, { method: "POST", body: "{}" });
-    await loadTasks();
-    await loadTask(created.task.id);
-    setChip("eChipStatus", "Task created");
+    window.location.href = `/empty-bins/tasks/${encodeURIComponent(created.task.id)}`;
   } catch (err) {
     window.RepoApp?.toast?.(err.message, "error");
     setChip("eChipStatus", "Error");
@@ -505,7 +503,6 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("click", (event) => {
     const taskCard = event.target.closest("[data-empty-task-id]");
     if (taskCard) {
-      loadTask(taskCard.dataset.emptyTaskId).catch((err) => window.RepoApp?.toast?.(err.message, "error"));
       return;
     }
     const taskAction = event.target.closest("[data-task-action]");
@@ -518,11 +515,5 @@ document.addEventListener("DOMContentLoaded", () => {
       const card = checkButton.closest("[data-location]");
       if (card) submitCheck(card, checkButton.dataset.checkAction);
     }
-  });
-  document.addEventListener("keydown", (event) => {
-    const taskCard = event.target.closest("[data-empty-task-id]");
-    if (!taskCard || (event.key !== "Enter" && event.key !== " ")) return;
-    event.preventDefault();
-    loadTask(taskCard.dataset.emptyTaskId).catch((err) => window.RepoApp?.toast?.(err.message, "error"));
   });
 });

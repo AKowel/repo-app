@@ -1,0 +1,42 @@
+<%- include('partials/head', { pageTitle: 'Empty Bin Audit' }) %>
+<div class="app-shell">
+<%- include('partials/header', { activePage: 'empty-bins' }) %>
+<div class="main">
+<%- include('partials/topbar', { pageLabel: 'Empty Bin Audit' }) %>
+<div class="pc pc-scroll">
+
+  <main class="audit-shell" data-task-id="<%= taskId %>">
+    <header class="audit-top">
+      <a class="audit-back" href="/empty-bins">Back to tasks</a>
+      <div class="audit-title-wrap">
+        <div class="audit-kicker">Empty Bin Check</div>
+        <h1 class="audit-title" id="auditTitle">Loading task</h1>
+      </div>
+      <div class="audit-chip-row">
+        <span class="audit-chip" id="auditStatusChip">Loading</span>
+        <span class="audit-chip audit-chip--accent" id="auditProgressChip"></span>
+      </div>
+    </header>
+
+    <section class="audit-progress">
+      <div class="audit-progress__bar"><span id="auditProgressBar"></span></div>
+      <div class="audit-progress__meta" id="auditProgressText"></div>
+    </section>
+
+    <section class="audit-main" id="auditMain">
+      <div class="audit-loading">Loading task...</div>
+    </section>
+  </main>
+
+</div>
+</div>
+</div>
+
+<script>
+  window.EMPTY_BIN_TASK_ID = <%- JSON.stringify(taskId) %>;
+</script>
+<script src="/js/site.js?v=<%= assetVersion %>"></script>
+<link rel="stylesheet" href="/css/empty-bin-audit.css?v=<%= assetVersion %>" />
+<script src="/js/empty-bin-task.js?v=<%= assetVersion %>"></script>
+</body>
+</html>

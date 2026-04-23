@@ -1898,6 +1898,10 @@ app.get("/empty-bins", requireAdminPage, (req, res) => {
   res.render("empty-bins", { clientChoices: [fandmChoice], selectedClient: EMPTY_BIN_CLIENT_CODE });
 });
 
+app.get("/empty-bins/tasks/:taskId", requireAdminPage, (req, res) => {
+  res.render("empty-bin-task", { taskId: req.params.taskId });
+});
+
 // ── API: reports data ─────────────────────────────────────────────────────
 app.get("/api/reports-data", requireAdminApi, async (req, res) => {
   const { client, mode, date, start, end, channels, rankBy, pc_zone_channels, hide_group_147, hideGroup147: hideGroup147Camel } = req.query;
