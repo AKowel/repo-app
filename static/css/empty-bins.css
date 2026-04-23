@@ -13,6 +13,10 @@
   min-height: 560px;
 }
 
+#eTaskWorkspace {
+  scroll-margin-top: 12px;
+}
+
 .empty-task-list {
   display: grid;
   gap: 8px;

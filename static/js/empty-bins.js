@@ -157,7 +157,17 @@ async function loadTasks() {
   }
 }
 
-async function loadTask(taskId, { silent = false } = {}) {
+function jumpToTaskWorkspace() {
+  const workspace = document.getElementById("eTaskWorkspace");
+  if (!workspace) return;
+  const run = () => {
+    workspace.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+  else setTimeout(run, 0);
+}
+
+async function loadTask(taskId, { silent = false, jump = true } = {}) {
   try {
     if (!silent) setChip("eChipStatus", "Loading task...");
     const data = await apiJson(`/api/empty-bin/tasks/${encodeURIComponent(taskId)}`);
@@ -167,6 +177,7 @@ async function loadTask(taskId, { silent = false } = {}) {
     renderReport();
     switchTab("task");
     if (!silent) setChip("eChipStatus", "Task loaded");
+    if (!silent && jump) jumpToTaskWorkspace();
     startPolling();
   } catch (err) {
     setChip("eChipStatus", "Task failed to load");
@@ -233,7 +244,7 @@ function renderTasks() {
       <span class="empty-task-card__meta">${escHtml(task.type === "move_pallets" ? "Move pallets" : "Empty check")} · ${escHtml(task.status)}</span>
       <span class="empty-task-card__counts">${fmt(task.checked_count)} checked · ${fmt(task.pending_count)} pending · ${fmt(task.system_cleared_count)} cleared</span>
       <span class="empty-task-card__assignee">${task.assignee ? `Assigned to ${escHtml(task.assignee.name || task.assignee.email)}` : "Unassigned"}</span>
-      <span class="empty-task-card__open">Open task</span>
+      <span class="empty-task-card__open">Start checking</span>
     </div>
   `).join("");
 }
