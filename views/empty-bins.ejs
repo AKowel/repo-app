@@ -9,11 +9,11 @@
     <div class="ph">
       <div>
         <span class="pt">Empty Bin Tasks</span>
-        <span class="ps">Task manager for daily empty-bin audits and clearing work</span>
+        <span class="ps">Daily empty-bin query, audit tasks, and clearing work</span>
       </div>
       <div class="ph-chips">
         <span class="chip" id="eChipClient"></span>
-        <span class="chip chip--a" id="eChipLive"></span>
+        <span class="chip chip--a" id="eChipReport"></span>
         <span class="chip" id="eChipTasks"></span>
         <span class="chip chip--status" id="eChipStatus"></span>
       </div>
@@ -60,7 +60,7 @@
             <option value="1000">1000</option>
           </select>
         </div>
-        <button class="btn btn--sm" id="eBtnLoadLive" style="align-self:flex-end">Refresh live</button>
+        <button class="btn btn--sm" id="eBtnLoadReport" style="align-self:flex-end">Reload report</button>
         <button class="btn btn--sm" id="eBtnRequestReport" style="align-self:flex-end">Request daily report</button>
         <button class="btn btn--primary btn--sm" id="eBtnCreateTask" style="align-self:flex-end">Create check task</button>
       </div>
@@ -84,11 +84,11 @@
       <div class="empty-bin-panel empty-bin-panel--main" id="eTaskWorkspace">
         <div class="card">
           <div class="tabrow" id="eTabs">
-            <button class="tabbtn reports-tab-btn reports-tab-btn--active tabbtn--on" data-tab="live">Live Empty</button>
+            <button class="tabbtn reports-tab-btn reports-tab-btn--active tabbtn--on" data-tab="daily">Daily Report</button>
             <button class="tabbtn reports-tab-btn" data-tab="task">Task Check</button>
             <button class="tabbtn reports-tab-btn" data-tab="report">Completed Report</button>
           </div>
-          <div id="eTab-live" class="reports-tab-content reports-tab-content--active"></div>
+          <div id="eTab-daily" class="reports-tab-content reports-tab-content--active"></div>
           <div id="eTab-task" class="reports-tab-content"></div>
           <div id="eTab-report" class="reports-tab-content"></div>
         </div>

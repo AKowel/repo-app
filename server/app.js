@@ -477,6 +477,7 @@ async function loadEmptyBinDayContext(client, reportDate) {
   const locations = new Set();
   const lastTransactions = new Map();
   const reportLocations = new Set();
+  let reportRows = [];
   let reportMeta = null;
   let reportFromCache = false;
   let reportError = "";
@@ -488,7 +489,8 @@ async function loadEmptyBinDayContext(client, reportDate) {
     const report = await service.loadEmptyBinsReportSnapshot(targetClient, selectedDate, { noCache: true });
     reportMeta = report.meta || null;
     reportFromCache = Boolean(report.fromCache);
-    for (const row of (report.rows || [])) {
+    reportRows = Array.isArray(report.rows) ? report.rows : [];
+    for (const row of reportRows) {
       const location = getEmptyBinsReportLocation(row);
       if (!location) continue;
       reportLocations.add(location);
@@ -527,6 +529,7 @@ async function loadEmptyBinDayContext(client, reportDate) {
     client: targetClient,
     transaction_locations: locations,
     report_locations: reportLocations,
+    empty_bins_report_rows: reportRows,
     last_transactions: lastTransactions,
     empty_bins_report_meta: reportMeta,
     empty_bins_report_from_cache: reportFromCache,
@@ -536,6 +539,75 @@ async function loadEmptyBinDayContext(client, reportDate) {
     pick_transaction_error: trxError,
     source_type: reportLocations.size ? "daily_empty_bin_report" : "binloc_last_move_out_or_pick_transactions",
   };
+}
+
+function serializeDailyEmptyBinReportRow(row, reportDate, liveRow = null, clientCode = EMPTY_BIN_CLIENT_CODE) {
+  const location = getEmptyBinsReportLocation(row);
+  if (!location) return null;
+  const parts = parseLocationCode(location);
+  const levelNum = getLocationLevelNumber(location);
+  const live = liveRow ? serializeEmptyBinLocation(liveRow) : null;
+  const lastTransaction = serializeDailyEmptyBinReportTransaction(row, reportDate, clientCode);
+  return {
+    location,
+    aisle_prefix: parts.aisle_prefix,
+    bay: parts.bay,
+    level: parts.level,
+    level_num: levelNum,
+    operating_area: live?.operating_area || normalizeOperatingArea(row?.BLWOPA || row?.operating_area || row?.["Op. Area"]),
+    bin_size: live?.bin_size || normalizeBinSizeCode(row?.bin_size || row?.["Bin Size"]),
+    bin_type: live?.bin_type || normalizeBinType(row?.bin_type || row?.["Pick / Bulk"]),
+    client_code: normalizeClientCode(clientCode),
+    item_sku: live?.item_sku || lastTransaction.item || "",
+    item_description: live?.item_description || String(row?.item_description || row?.Description || "").trim(),
+    current_qty: live?.current_qty ?? 0,
+    available_qty: live?.available_qty ?? 0,
+    qty_under_query: live?.qty_under_query ?? 0,
+    goods_in_pending: live?.goods_in_pending ?? 0,
+    pending_from: live?.pending_from ?? "",
+    pending_to: live?.pending_to ?? "",
+    max_bin_qty: live?.max_bin_qty ?? 0,
+    checked_digit: live?.checked_digit ?? "",
+    status: live?.status || "Y",
+    last_move_out_date: live?.last_move_out_date || normalizeReportDate(reportDate),
+    last_move_in_date: live?.last_move_in_date || "",
+    live_empty: live?.live_empty ?? null,
+    report_date: normalizeReportDate(reportDate),
+    source_reason: "daily_empty_bin_report",
+    last_transaction: lastTransaction,
+  };
+}
+
+function buildDailyEmptyBinReportRows(reportRows, reportDate, liveByLocation = new Map(), clientCode = EMPTY_BIN_CLIENT_CODE) {
+  return (reportRows || [])
+    .map((row) => serializeDailyEmptyBinReportRow(
+      row,
+      reportDate,
+      liveByLocation.get(getEmptyBinsReportLocation(row)) || null,
+      clientCode
+    ))
+    .filter(Boolean)
+    .sort((a, b) => a.location.localeCompare(b.location));
+}
+
+function filterDailyEmptyBinReportRows(rows, query = {}, { client = EMPTY_BIN_CLIENT_CODE } = {}) {
+  const area = normalizeOperatingArea(query.area);
+  const binSize = normalizeBinSizeCode(query.bin_size || query.binSize);
+  const binType = String(query.bin_type || query.binType || "").trim().toUpperCase();
+  const search = String(query.search || "").trim().toUpperCase();
+  const targetClient = normalizeClientCode(client || query.client || EMPTY_BIN_CLIENT_CODE);
+
+  return (rows || [])
+    .filter((row) => {
+      if (!row?.location) return false;
+      if (targetClient && normalizeClientCode(row.client_code) !== targetClient) return false;
+      if (area && row.operating_area !== area) return false;
+      if (binSize && row.bin_size !== binSize) return false;
+      if (binType && String(row.bin_type || "").toUpperCase() !== binType) return false;
+      if (search && !`${row.location} ${row.operating_area} ${row.bin_size} ${row.bin_type} ${row.item_sku} ${row.item_description}`.toUpperCase().includes(search)) return false;
+      return true;
+    })
+    .sort((a, b) => a.location.localeCompare(b.location));
 }
 
 function getEmptyBinDateReason(row, dayContext) {
@@ -4137,45 +4209,38 @@ app.post("/api/empty-bin/report-sync-request", requireAdminApi, async (req, res)
   }
 });
 
-app.get("/api/empty-bin/live", requireAdminApi, async (req, res) => {
+app.get("/api/empty-bin/report", requireAdminApi, async (req, res) => {
   const client = EMPTY_BIN_CLIENT_CODE;
   const reportDate = normalizeReportDate(req.query.date || req.query.report_date);
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 25), 1000);
+
   try {
-    const [live, dayContext] = await Promise.all([
-      loadEmptyBinLiveIndex(client),
-      loadEmptyBinDayContext(client, reportDate),
-    ]);
-    const optionRows = filterEmptyBinRows(live.rows, req.query, {
-      client,
-      dayContext,
-      includeAreaFilters: false,
-    });
-    const filteredRows = filterEmptyBinRows(live.rows, req.query, { client, dayContext });
+    const dayContext = await loadEmptyBinDayContext(client, reportDate);
+    if (!(dayContext.empty_bins_report_rows || []).length) {
+      return res.status(404).json({ ok: false, error: `No daily empty-bin report snapshot is available for ${reportDate}.` });
+    }
+    const live = await loadEmptyBinLiveIndex(client).catch(() => ({ liveByLocation: new Map(), meta: null, fromCache: false }));
+    const sourceRows = buildDailyEmptyBinReportRows(
+      dayContext.empty_bins_report_rows,
+      reportDate,
+      live.liveByLocation,
+      client
+    );
+    const filteredRows = filterDailyEmptyBinReportRows(sourceRows, req.query, { client });
     return res.json({
       ok: true,
       meta: {
         client,
         report_date: reportDate,
-        snapshot_date: live.meta?.snapshot_date || "",
-        source_synced_at: live.meta?.source_synced_at || live.meta?.uploaded_at || "",
-        row_count: live.rows.length,
-        from_cache: live.fromCache,
-        filters: buildEmptyBinFilterOptions(optionRows),
-        day_source: {
-          type: dayContext.source_type || "binloc_last_move_out_or_pick_transactions",
-          empty_bins_report_row_count: dayContext.empty_bins_report_meta?.row_count ?? null,
-          empty_bins_report_locations: dayContext.report_locations?.size || 0,
-          empty_bins_report_from_cache: dayContext.empty_bins_report_from_cache,
-          empty_bins_report_error: dayContext.empty_bins_report_error,
-          pick_transaction_row_count: dayContext.pick_transaction_meta?.row_count ?? null,
-          pick_transaction_locations: dayContext.transaction_locations.size,
-          pick_transaction_from_cache: dayContext.pick_transaction_from_cache,
-          pick_transaction_error: dayContext.pick_transaction_error,
-        },
+        row_count: sourceRows.length,
+        snapshot_date: dayContext.empty_bins_report_meta?.snapshot_date || reportDate,
+        uploaded_at: dayContext.empty_bins_report_meta?.uploaded_at || "",
+        source_synced_at: dayContext.empty_bins_report_meta?.source_synced_at || dayContext.empty_bins_report_meta?.uploaded_at || "",
+        from_cache: Boolean(dayContext.empty_bins_report_from_cache),
+        filters: buildEmptyBinFilterOptions(sourceRows),
       },
       summary: {
-        empty_count: filteredRows.length,
+        report_count: sourceRows.length,
         returned_count: Math.min(filteredRows.length, limit),
       },
       rows: filteredRows.slice(0, limit),
@@ -4203,23 +4268,28 @@ app.post("/api/empty-bin/tasks", requireAdminApi, async (req, res) => {
     : [];
 
   try {
-    const [live, dayContext] = await Promise.all([
-      loadEmptyBinLiveIndex(client),
-      loadEmptyBinDayContext(client, reportDate),
-    ]);
+    const dayContext = await loadEmptyBinDayContext(client, reportDate);
+    if (!(dayContext.empty_bins_report_rows || []).length) {
+      return res.status(400).json({ ok: false, error: `No daily empty-bin report snapshot is available for ${reportDate}.` });
+    }
+    const live = await loadEmptyBinLiveIndex(client).catch(() => ({ liveByLocation: new Map(), meta: null, fromCache: false }));
+    const sourceRows = buildDailyEmptyBinReportRows(
+      dayContext.empty_bins_report_rows,
+      reportDate,
+      live.liveByLocation,
+      client
+    );
     let rows;
     if (requestedLocations.length) {
       rows = requestedLocations
-        .map(location => live.liveByLocation.get(location))
-        .filter(row => row && row.live_empty)
-        .filter(row => getEmptyBinDateReason(row, dayContext))
-        .map(row => ({ ...row, report_date: reportDate, source_reason: getEmptyBinDateReason(row, dayContext), last_transaction: dayContext.last_transactions.get(row.location) || null }));
+        .map(location => sourceRows.find(row => row.location === location))
+        .filter(Boolean);
     } else {
-      rows = filterEmptyBinRows(live.rows, { ...filters, date: reportDate }, { client, dayContext }).slice(0, limit);
+      rows = filterDailyEmptyBinReportRows(sourceRows, { ...filters, date: reportDate }, { client }).slice(0, limit);
     }
 
     if (!rows.length) {
-      return res.status(400).json({ ok: false, error: "No FANDMKET locations that went empty on this date are still empty in BINLOC." });
+      return res.status(400).json({ ok: false, error: "No locations matched the daily empty-bin report filters for that date." });
     }
 
     const task = emptyBinTaskStore.createTask({
@@ -4230,7 +4300,7 @@ app.post("/api/empty-bin/tasks", requireAdminApi, async (req, res) => {
       filters: requestedLocations.length
         ? { selected_locations: requestedLocations, report_date: reportDate }
         : { ...filters, report_date: reportDate },
-      snapshotMeta: { ...(live.meta || {}), report_date: reportDate, day_source: dayContext.source_type || "binloc_last_move_out_or_pick_transactions" },
+      snapshotMeta: { ...(dayContext.empty_bins_report_meta || {}), report_date: reportDate, day_source: "daily_empty_bin_report" },
       items: rows,
     });
     return res.json({ ok: true, task: summarizeEmptyBinTask(task), full_task: task });

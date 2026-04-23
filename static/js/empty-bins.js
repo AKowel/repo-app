@@ -1,6 +1,6 @@
 "use strict";
 
-let _live = null;
+let _report = null;
 let _tasks = [];
 let _activeTask = null;
 let _activeSummary = null;
@@ -24,9 +24,10 @@ function fmt(n) {
 function computeTaskSummary(task, summary = null) {
   const items = Array.isArray(task?.items) ? task.items : [];
   return {
-    checked_count: items.filter((item) => item.status && item.status !== "pending" && item.status !== "system_cleared").length,
+    checked_count: items.filter((item) => item.status && !["pending", "system_cleared", "operations_filled"].includes(item.status)).length,
     pending_count: items.filter((item) => item.status === "pending").length,
     system_cleared_count: items.filter((item) => item.status === "system_cleared").length,
+    operations_filled_count: items.filter((item) => item.status === "operations_filled").length,
     photo_count: items.reduce((sum, item) => sum + ((item.photos || []).length), 0),
     ...(summary && typeof summary === "object" ? summary : {}),
   };
@@ -50,9 +51,7 @@ function formatDateTimeText(value) {
   const text = String(value || "").trim();
   if (!text) return "-";
   const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toLocaleString();
-  }
+  if (!Number.isNaN(parsed.getTime())) return parsed.toLocaleString();
   return text;
 }
 
@@ -87,21 +86,20 @@ function statusLabel(status) {
     cleared: "Cleared",
     operations_filled: "Operations filled",
     stopped: "Stopped",
-    empty_pallet: "Empty pallet",
-    move_required: "Needs move",
-    moved: "Moved",
     skipped: "Skipped",
-    cannot_complete: "Cannot complete",
     system_cleared: "System cleared",
+    completed: "Completed",
+    available: "Available",
+    in_progress: "In progress",
   };
   return labels[status] || status || "Pending";
 }
 
 function statusTone(status) {
-  if (status === "pending") return "pending";
+  if (status === "pending" || status === "available" || status === "in_progress") return "pending";
   if (status === "system_cleared") return "system";
-  if (status === "checked_empty" || status === "empty_pallet" || status === "moved" || status === "cleared" || status === "operations_filled") return "good";
-  if (status === "checked_not_empty" || status === "cannot_complete") return "bad";
+  if (["checked_empty", "cleared", "operations_filled", "completed"].includes(status)) return "good";
+  if (status === "checked_not_empty") return "bad";
   return "warn";
 }
 
@@ -135,7 +133,7 @@ function selectedReportDate() {
   return inpDate()?.value || dateOffsetYmd(-1);
 }
 
-function buildLiveQuery() {
+function buildReportQuery() {
   const params = new URLSearchParams();
   params.set("client", selClient().value);
   params.set("date", selectedReportDate());
@@ -172,6 +170,7 @@ async function apiJson(url, options = {}) {
 }
 
 function updateSelectOptions(select, options, key, placeholder) {
+  if (!select) return;
   const previous = select.value;
   select.innerHTML = `<option value="">${escHtml(placeholder)}</option>` +
     (options || []).slice(0, 150).map((item) =>
@@ -180,20 +179,10 @@ function updateSelectOptions(select, options, key, placeholder) {
   if ([...select.options].some((option) => option.value === previous)) select.value = previous;
 }
 
-async function loadLive() {
-  setChip("eChipStatus", "Loading live BINLOC...");
-  try {
-    const data = await apiJson("/api/empty-bin/live?" + buildLiveQuery().toString());
-    _live = data;
-    updateSelectOptions(selArea(), data.meta?.filters?.areas || [], "area", "All areas");
-    updateSelectOptions(selBinSize(), data.meta?.filters?.bin_sizes || [], "bin_size", "All sizes");
-    renderLive();
-    setChip("eChipLive", `${fmt(data.summary.empty_count)} empties on ${data.meta?.report_date || selectedReportDate()}`);
-    setChip("eChipStatus", "Live loaded");
-  } catch (err) {
-    document.getElementById("eTab-live").innerHTML = errorHtml(err.message);
-    setChip("eChipStatus", "Error");
-  }
+function setCreateTaskEnabled(enabled) {
+  const button = document.getElementById("eBtnCreateTask");
+  if (!button) return;
+  button.disabled = !enabled;
 }
 
 function stopReportSyncPolling() {
@@ -236,7 +225,7 @@ function renderReportSyncStatus() {
       <div class="empty-sync-banner empty-sync-banner--ready">
         <div class="empty-sync-banner__title">Daily empty-bin report is ready for ${escHtml(_reportSync.report_date || selectedReportDate())}.</div>
         <div class="empty-sync-banner__meta">
-          ${fmt(snapshot.row_count)} rows &middot; source ${escHtml(snapshot.source || "odbc")} &middot; uploaded ${escHtml(formatDateTimeText(snapshot.uploaded_at))} &middot; synced ${escHtml(formatDateTimeText(snapshot.source_synced_at))}
+          ${fmt(snapshot.row_count)} rows | uploaded ${escHtml(formatDateTimeText(snapshot.uploaded_at))} | synced ${escHtml(formatDateTimeText(snapshot.source_synced_at))}
         </div>
       </div>
     `;
@@ -245,14 +234,12 @@ function renderReportSyncStatus() {
 
   if (status === "queued" || status === "running") {
     const requested = job?.requested_at ? `Requested ${escHtml(formatDateTimeText(job.requested_at))}` : "Request queued";
-    const claimed = job?.claimed_at ? ` &middot; Started ${escHtml(formatDateTimeText(job.claimed_at))}` : "";
+    const claimed = job?.claimed_at ? ` | Started ${escHtml(formatDateTimeText(job.claimed_at))}` : "";
     el.innerHTML = `
       <div class="empty-sync-banner empty-sync-banner--pending">
         <div class="empty-sync-banner__title">Daily empty-bin report is ${escHtml(status)} for ${escHtml(_reportSync.report_date || selectedReportDate())}.</div>
-        <div class="empty-sync-banner__meta">
-          ${requested}${claimed} &middot; Requested by ${escHtml(job?.requested_by || "-")}
-        </div>
-        <div class="empty-sync-banner__note">Repo-app is using live BINLOC plus same-day transaction fallbacks until the daily report snapshot arrives.</div>
+        <div class="empty-sync-banner__meta">${requested}${claimed} | Requested by ${escHtml(job?.requested_by || "-")}</div>
+        <div class="empty-sync-banner__note">Tasks are created from the daily report snapshot once it arrives.</div>
       </div>
     `;
     return;
@@ -262,9 +249,7 @@ function renderReportSyncStatus() {
     el.innerHTML = `
       <div class="empty-sync-banner empty-sync-banner--failed">
         <div class="empty-sync-banner__title">The last daily empty-bin report request failed for ${escHtml(_reportSync.report_date || selectedReportDate())}.</div>
-        <div class="empty-sync-banner__meta">
-          Failed ${escHtml(formatDateTimeText(job.failed_at || job.completed_at || job.requested_at))} &middot; Attempt ${fmt(job.attempt_count || 0)}
-        </div>
+        <div class="empty-sync-banner__meta">Failed ${escHtml(formatDateTimeText(job.failed_at || job.completed_at || job.requested_at))} | Attempt ${fmt(job.attempt_count || 0)}</div>
         <div class="empty-sync-banner__note">${escHtml(job.error_text || "The local sync agent reported a failure.")}</div>
       </div>
     `;
@@ -273,37 +258,31 @@ function renderReportSyncStatus() {
 
   el.innerHTML = `
     <div class="empty-sync-banner empty-sync-banner--idle">
-      <div class="empty-sync-banner__title">No daily empty-bin report snapshot has been requested for ${escHtml(_reportSync.report_date || selectedReportDate())} yet.</div>
-      <div class="empty-sync-banner__note">Repo-app can still work from live BINLOC and same-day transaction data, but requesting the daily report gives you the exact snapshot from the local sync machine.</div>
+      <div class="empty-sync-banner__title">No daily empty-bin report snapshot has been loaded for ${escHtml(_reportSync.report_date || selectedReportDate())} yet.</div>
+      <div class="empty-sync-banner__note">Request the daily report first, then create the audit from that exact snapshot.</div>
     </div>
   `;
 }
 
 async function loadReportSyncStatus({ silent = false } = {}) {
   const previousAvailable = Boolean(_reportSync?.snapshot?.available);
-  const previousStatus = String(_reportSync?.status || "").trim().toLowerCase();
   try {
     const data = await apiJson("/api/empty-bin/report-sync-status?" + buildReportSyncQuery().toString());
     _reportSync = data.sync || null;
     renderReportSyncStatus();
     startReportSyncPolling();
     const nextAvailable = Boolean(_reportSync?.snapshot?.available);
-    const nextStatus = String(_reportSync?.status || "").trim().toLowerCase();
     if (!previousAvailable && nextAvailable) {
-      await loadLive();
+      await loadSourceReport();
       if (_reportSyncReadyToast) {
         window.RepoApp?.toast?.("Daily empty-bin report loaded.", "success");
         _reportSyncReadyToast = false;
       }
-    } else if (previousStatus !== nextStatus && nextStatus === "ready") {
-      await loadLive();
     }
   } catch (err) {
     stopReportSyncPolling();
     document.getElementById("eReportSyncStatus").innerHTML = errorHtml(err.message);
-    if (!silent) {
-      window.RepoApp?.toast?.(err.message, "error");
-    }
+    if (!silent) window.RepoApp?.toast?.(err.message, "error");
   }
 }
 
@@ -325,7 +304,7 @@ async function requestReportSync(force = false) {
       _reportSyncReadyToast = false;
       window.RepoApp?.toast?.("Daily empty-bin report is already available.", "success");
       setChip("eChipStatus", "Report ready");
-      await loadLive();
+      await loadSourceReport();
     } else {
       _reportSyncReadyToast = true;
       window.RepoApp?.toast?.(`Daily empty-bin report is already ${_reportSync?.status || "queued"}.`, "info");
@@ -334,6 +313,29 @@ async function requestReportSync(force = false) {
   } catch (err) {
     window.RepoApp?.toast?.(err.message, "error");
     setChip("eChipStatus", "Request failed");
+  }
+}
+
+async function loadSourceReport() {
+  setChip("eChipStatus", "Loading daily report...");
+  try {
+    const data = await apiJson("/api/empty-bin/report?" + buildReportQuery().toString());
+    _report = data;
+    updateSelectOptions(selArea(), data.meta?.filters?.areas || [], "area", "All areas");
+    updateSelectOptions(selBinSize(), data.meta?.filters?.bin_sizes || [], "bin_size", "All sizes");
+    renderSourceReport();
+    setCreateTaskEnabled(Boolean(data.rows?.length));
+    setChip("eChipReport", `${fmt(data.summary?.returned_count || data.rows?.length || 0)} report rows`);
+    setChip("eChipStatus", "Report loaded");
+  } catch (err) {
+    _report = null;
+    setCreateTaskEnabled(false);
+    setChip("eChipReport", "");
+    const notReady = String(err.message || "").includes("No daily empty-bin report snapshot is available");
+    document.getElementById("eTab-daily").innerHTML = notReady
+      ? emptyState(`Request the daily empty-bin report for ${selectedReportDate()} to load locations.`)
+      : errorHtml(err.message);
+    setChip("eChipStatus", notReady ? "Report needed" : "Report error");
   }
 }
 
@@ -352,9 +354,7 @@ async function loadTasks() {
 function jumpToTaskWorkspace() {
   const workspace = document.getElementById("eTaskWorkspace");
   if (!workspace) return;
-  const run = () => {
-    workspace.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+  const run = () => workspace.scrollIntoView({ behavior: "smooth", block: "start" });
   if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
   else setTimeout(run, 0);
 }
@@ -366,7 +366,7 @@ async function loadTask(taskId, { silent = false, jump = true } = {}) {
     _activeTask = data.task;
     _activeSummary = data.summary;
     renderTask();
-    renderReport();
+    renderCompletedReport();
     switchTab("task");
     if (!silent) setChip("eChipStatus", "Task loaded");
     if (!silent && jump) jumpToTaskWorkspace();
@@ -383,46 +383,45 @@ function startPolling() {
   if (_pollTimer) clearInterval(_pollTimer);
   if (!_activeTask) return;
   _pollTimer = setInterval(() => {
-    if (_activeTask?.id) loadTask(_activeTask.id, { silent: true }).catch(() => {});
+    if (_activeTask?.id) loadTask(_activeTask.id, { silent: true, jump: false }).catch(() => {});
   }, 5 * 60 * 1000);
 }
 
-function renderLive() {
-  const rows = _live?.rows || [];
-  const meta = _live?.meta || {};
-  const daySource = meta.day_source || {};
-  const daySourceText = daySource.type === "daily_empty_bin_report"
-    ? `${fmt(daySource.empty_bins_report_locations || 0)} daily report locations`
-    : `${fmt(daySource.pick_transaction_locations || 0)} same-day pick locations`;
+function renderSourceReport() {
+  const rows = _report?.rows || [];
+  const meta = _report?.meta || {};
+  const createDisabled = !rows.length;
   const html = `
     <div class="empty-live-head">
       <div>
-        <div class="empty-title">FANDMKET empty locations for ${escHtml(meta.report_date || selectedReportDate())}</div>
-        <div class="empty-muted">BINLOC ${escHtml(meta.snapshot_date || "latest")} &middot; synced ${escHtml(meta.source_synced_at || "-")} &middot; ${escHtml(daySourceText)}</div>
+        <div class="empty-title">Daily empty-bin report for ${escHtml(meta.report_date || selectedReportDate())}</div>
+        <div class="empty-muted">Uploaded ${escHtml(formatDateTimeText(meta.uploaded_at))} | synced ${escHtml(formatDateTimeText(meta.source_synced_at))} | ${fmt(meta.row_count || rows.length)} locations in snapshot</div>
       </div>
-      <button class="btn btn--primary btn--sm" id="eBtnCreateTaskInline">Create task from this view</button>
+      <button class="btn btn--primary btn--sm" id="eBtnCreateTaskInline" ${createDisabled ? "disabled" : ""}>Create task from report</button>
     </div>
-    ${daySource.empty_bins_report_error ? `<div class="empty-system-banner">Daily empty-bin report snapshot was not available: ${escHtml(daySource.empty_bins_report_error)}.</div>` : ""}
-    ${daySource.pick_transaction_error ? `<div class="empty-system-banner">Pick transaction snapshot was not available: ${escHtml(daySource.pick_transaction_error)}. BINLOC last-move-out dates are still being used.</div>` : ""}
-    ${rows.length ? `<div class="empty-live-list">${rows.map(renderLiveRow).join("")}</div>` : emptyState("No FANDMKET locations that went empty on this date are still empty in live BINLOC.")}
+    ${rows.length ? `<div class="empty-live-list">${rows.map(renderSourceRow).join("")}</div>` : emptyState("No locations matched the daily report filters for this date.")}
   `;
-  document.getElementById("eTab-live").innerHTML = html;
+  document.getElementById("eTab-daily").innerHTML = html;
   document.getElementById("eBtnCreateTaskInline")?.addEventListener("click", createTaskFromFilters);
 }
 
-function renderLiveRow(row) {
+function renderSourceRow(row) {
+  const liveState = row.live_empty === null || row.live_empty === undefined
+    ? "Live status unavailable"
+    : row.live_empty
+      ? "Still empty in BINLOC"
+      : "Now filled in BINLOC";
   return `
     <div class="empty-live-row">
       <div>
         <div class="empty-location">${escHtml(row.location)}</div>
         <div class="empty-last-transaction">${escHtml(formatLastTransaction(row.last_transaction))}</div>
-        <div class="empty-muted">${escHtml(row.source_reason || "date matched")} &middot; out ${escHtml(row.last_move_out_date || "-")}</div>
-        <div class="empty-muted">${escHtml(row.operating_area || "-")} · ${escHtml(row.bin_size || "-")} · level ${escHtml(row.level || "-")}</div>
+        <div class="empty-muted">${escHtml(row.operating_area || "-")} | ${escHtml(row.bin_size || "-")} | ${escHtml(row.bin_type || "-")} | level ${escHtml(row.level || "-")}</div>
       </div>
       <div class="empty-live-row__meta">
-        <span>${escHtml(row.bin_type || "-")}</span>
-        <span>Out ${escHtml(row.last_move_out_date || "-")}</span>
-        <span>Max ${fmt(row.max_bin_qty)}</span>
+        <span>${escHtml(liveState)}</span>
+        <span>Live qty ${fmt(row.current_qty)}</span>
+        <span>SKU ${escHtml(row.item_sku || "-")}</span>
       </div>
     </div>
   `;
@@ -431,427 +430,7 @@ function renderLiveRow(row) {
 function renderTasks() {
   const el = document.getElementById("eTaskList");
   if (!_tasks.length) {
-    el.innerHTML = emptyState("No empty-bin tasks yet. Create one from the live report.");
-    return;
-  }
-  el.innerHTML = _tasks.map((task) => `
-    <a class="empty-task-card ${_activeTask?.id === task.id ? "empty-task-card--active" : ""}" data-empty-task-id="${escAttr(task.id)}" href="/empty-bins/tasks/${encodeURIComponent(task.id)}">
-      <span class="empty-task-card__title">${escHtml(task.title)}</span>
-      <span class="empty-task-card__meta">${escHtml(task.type === "move_pallets" ? "Move pallets" : "Empty check")} · ${escHtml(task.status)}</span>
-      <span class="empty-task-card__counts">${fmt(task.checked_count)} checked · ${fmt(task.pending_count)} pending · ${fmt(task.system_cleared_count)} cleared</span>
-      <span class="empty-task-card__assignee">${task.assignee ? `Assigned to ${escHtml(task.assignee.name || task.assignee.email)}` : "Unassigned"}</span>
-      <span class="empty-task-card__open">Start checking</span>
-    </a>
-  `).join("");
-}
-
-function taskControlsHtml(task, summary) {
-  const assigned = Boolean(task.assignee);
-  return `
-    <div class="empty-task-controls">
-      <div>
-        <div class="empty-title">${escHtml(task.title)}</div>
-        <div class="empty-muted">${fmt(summary.checked_count)} checked · ${fmt(summary.pending_count)} pending · ${fmt(summary.system_cleared_count)} system cleared · ${fmt(summary.photo_count)} photos</div>
-      </div>
-      <div class="empty-task-actions">
-        <button class="btn btn--sm" data-task-action="assign">${assigned ? "Reassign to me" : "Assign to me"}</button>
-        <button class="btn btn--sm" data-task-action="drop">Drop task</button>
-        <button class="btn btn--sm" data-task-action="followup">Create move task</button>
-        <button class="btn btn--primary btn--sm" data-task-action="complete">Complete</button>
-      </div>
-    </div>
-  `;
-}
-
-function renderTask() {
-  const el = document.getElementById("eTab-task");
-  if (!_activeTask) {
-    el.innerHTML = emptyState("Open or create a task to start checking locations.");
-    return;
-  }
-  const allItems = (_activeTask.items || []);
-  const hiddenSystemCleared = allItems.filter(item => item.status === "system_cleared").length;
-  const items = allItems.filter(item => item.status !== "system_cleared").slice().sort((a, b) => {
-    const aPending = a.status === "pending" ? 0 : 1;
-    const bPending = b.status === "pending" ? 0 : 1;
-    return aPending - bPending || a.sort_index - b.sort_index;
-  });
-  const cards = items.map(renderCheckCard).join("");
-  el.innerHTML = taskControlsHtml(_activeTask, _activeSummary || summarizeClientTask(_activeTask)) +
-    (hiddenSystemCleared ? `<div class="empty-system-banner">${fmt(hiddenSystemCleared)} locations were cleared by live BINLOC and are hidden from the checking queue. They remain in the report tab.</div>` : "") +
-    `<div class="empty-check-list">${cards}</div>`;
-}
-
-function summarizeClientTask(task) {
-  const items = task.items || [];
-  return {
-    checked_count: items.filter(item => item.status && item.status !== "pending" && item.status !== "system_cleared").length,
-    pending_count: items.filter(item => item.status === "pending").length,
-    system_cleared_count: items.filter(item => item.status === "system_cleared").length,
-    photo_count: items.reduce((sum, item) => sum + ((item.photos || []).length), 0),
-  };
-}
-
-function renderCheckCard(item) {
-  const pending = item.status === "pending";
-  const live = item.live || {};
-  const actions = _activeTask?.type === "move_pallets"
-    ? [
-        ["moved", "Moved"],
-        ["cannot_complete", "Cannot do"],
-        ["skipped", "Skip"],
-      ]
-    : [
-        ["empty", "Empty"],
-        ["not_empty", "Not empty"],
-        ["empty_pallet", "Empty pallet"],
-        ["needs_move", "Needs move"],
-      ];
-  const photos = (item.photos || []).map((photo) =>
-    `<a class="empty-photo" href="${escAttr(photo.url)}" target="_blank" rel="noreferrer"><img src="${escAttr(photo.url)}" alt="Photo for ${escAttr(item.location)}" /></a>`
-  ).join("");
-  return `
-    <div class="empty-check-card empty-check-card--${escAttr(statusTone(item.status))}" data-location="${escAttr(item.location)}">
-      <div class="empty-check-card__top">
-        <div>
-          <div class="empty-location">${escHtml(item.location)}</div>
-          <div class="empty-last-transaction">${escHtml(formatLastTransaction(item.last_transaction))}</div>
-          <div class="empty-muted">${escHtml(item.operating_area || "-")} · ${escHtml(item.bin_size || "-")} · ${escHtml(item.bin_type || "-")} · level ${escHtml(item.level || "-")}</div>
-        </div>
-        ${chipStatus(item.status)}
-      </div>
-      <div class="empty-facts">
-        <span>Live qty ${fmt(live.current_qty ?? item.current_qty_at_create)}</span>
-        <span>Live SKU ${escHtml(live.item_sku || "-")}</span>
-        <span>${escHtml(formatLastTransaction(item.last_transaction))}</span>
-      </div>
-      ${item.system_cleared_reason ? `<div class="empty-system-note">${escHtml(item.system_cleared_reason)}</div>` : ""}
-      ${item.note ? `<div class="empty-note">${escHtml(item.note)}</div>` : ""}
-      ${photos ? `<div class="empty-photo-row">${photos}</div>` : ""}
-      ${pending ? `
-        <div class="empty-card-inputs">
-          <textarea class="fi empty-note-input" placeholder="Optional note"></textarea>
-          <input class="fi empty-photo-input" type="file" accept="image/*" capture="environment" />
-        </div>
-        <div class="empty-card-actions">
-          ${actions.map(([action, label]) => `<button class="btn btn--sm ${action === "empty" || action === "moved" ? "btn--primary" : ""}" data-check-action="${escAttr(action)}">${escHtml(label)}</button>`).join("")}
-        </div>
-      ` : ""}
-    </div>
-  `;
-}
-
-function renderReport() {
-  const el = document.getElementById("eTab-report");
-  if (!_activeTask) {
-    el.innerHTML = emptyState("Open a task to view the full report.");
-    return;
-  }
-  const rows = _activeTask.items || [];
-  el.innerHTML = `
-    ${taskControlsHtml(_activeTask, _activeSummary || summarizeClientTask(_activeTask))}
-    <div class="empty-report-list">
-      ${rows.map(renderReportRow).join("")}
-    </div>
-  `;
-}
-
-function renderReportRow(item) {
-  const photos = (item.photos || []).map((photo) =>
-    `<a class="empty-photo" href="${escAttr(photo.url)}" target="_blank" rel="noreferrer"><img src="${escAttr(photo.url)}" alt="Photo for ${escAttr(item.location)}" /></a>`
-  ).join("");
-  return `
-    <div class="empty-report-row">
-      <div>
-        <div class="empty-location">${escHtml(item.location)}</div>
-        <div class="empty-last-transaction">${escHtml(formatLastTransaction(item.last_transaction))}</div>
-        <div class="empty-muted">${escHtml(item.operating_area || "-")} · ${escHtml(item.bin_size || "-")} · ${escHtml(item.bin_type || "-")}</div>
-        ${item.note ? `<div class="empty-note">${escHtml(item.note)}</div>` : ""}
-      </div>
-      <div>${chipStatus(item.status)}</div>
-      <div class="empty-photo-row">${photos || "<span class='empty-muted'>No photos</span>"}</div>
-    </div>
-  `;
-}
-
-function emptyState(message) {
-  return `<div class="empty-state"><div class="empty-state__title">Nothing here yet</div><div class="empty-state__desc">${escHtml(message)}</div></div>`;
-}
-
-function errorHtml(message) {
-  return `<div class="alert alert--error" style="margin:12px">${escHtml(message)}</div>`;
-}
-
-function switchTab(name) {
-  document.querySelectorAll("#eTabs .reports-tab-btn").forEach((btn) => {
-    const active = btn.dataset.tab === name;
-    btn.classList.toggle("reports-tab-btn--active", active);
-    btn.classList.toggle("tabbtn--on", active);
-  });
-  document.querySelectorAll("#eTab-live,#eTab-task,#eTab-report").forEach((el) => {
-    el.classList.toggle("reports-tab-content--active", el.id === `eTab-${name}`);
-  });
-}
-
-async function createTaskFromFilters() {
-  setChip("eChipStatus", "Creating task...");
-  const filters = {};
-  filters.date = selectedReportDate();
-  if (selArea().value) filters.area = selArea().value;
-  if (selBinSize().value) filters.bin_size = selBinSize().value;
-  if (inpSearch().value.trim()) filters.search = inpSearch().value.trim();
-  try {
-    const created = await apiJson("/api/empty-bin/tasks", {
-      method: "POST",
-      body: JSON.stringify({
-        client: selClient().value,
-        type: "empty_check",
-        title: `Daily empty bin check ${selectedReportDate()}`,
-        report_date: selectedReportDate(),
-        filters,
-        limit: selLimit().value,
-      }),
-    });
-    const assigned = await apiJson(`/api/empty-bin/tasks/${encodeURIComponent(created.task.id)}/assign`, { method: "POST", body: "{}" });
-    storeBootstrapTask(created.task.id, assigned.task, assigned.summary);
-    window.location.href = `/empty-bins/tasks/${encodeURIComponent(created.task.id)}`;
-  } catch (err) {
-    window.RepoApp?.toast?.(err.message, "error");
-    setChip("eChipStatus", "Error");
-  }
-}
-
-async function handleTaskAction(action) {
-  if (!_activeTask) return;
-  const id = encodeURIComponent(_activeTask.id);
-  const endpoint = {
-    assign: `/api/empty-bin/tasks/${id}/assign`,
-    drop: `/api/empty-bin/tasks/${id}/drop`,
-    complete: `/api/empty-bin/tasks/${id}/complete`,
-    followup: `/api/empty-bin/tasks/${id}/create-followup`,
-  }[action];
-  if (!endpoint) return;
-  try {
-    const data = await apiJson(endpoint, { method: "POST", body: "{}" });
-    if (action === "followup") {
-      if (data.full_task?.id) storeBootstrapTask(data.full_task.id, data.full_task, data.task);
-      await loadTasks();
-      await loadTask(data.task.id);
-    } else {
-      await loadTasks();
-      await loadTask(_activeTask.id, { silent: true });
-    }
-  } catch (err) {
-    window.RepoApp?.toast?.(err.message, "error");
-  }
-}
-
-function readFileAsDataUrl(file) {
-  if (!file) return Promise.resolve("");
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("Could not read image."));
-    reader.readAsDataURL(file);
-  });
-}
-
-async function submitCheck(card, action) {
-  const location = card.dataset.location;
-  const note = card.querySelector(".empty-note-input")?.value || "";
-  const file = card.querySelector(".empty-photo-input")?.files?.[0] || null;
-  const imageDataUrl = await readFileAsDataUrl(file);
-  try {
-    await apiJson(`/api/empty-bin/tasks/${encodeURIComponent(_activeTask.id)}/locations/${encodeURIComponent(location)}/check`, {
-      method: "POST",
-      body: JSON.stringify({ action, note, image_data_url: imageDataUrl }),
-    });
-    await loadTask(_activeTask.id, { silent: true });
-  } catch (err) {
-    window.RepoApp?.toast?.(err.message, "error");
-  }
-}
-
-function renderTasks() {
-  const el = document.getElementById("eTaskList");
-  if (!_tasks.length) {
-    el.innerHTML = emptyState("No empty-bin tasks yet. Create one from the live report.");
-    return;
-  }
-  el.innerHTML = _tasks.map((task) => {
-    const autoResolvedCount = Number(task.operations_filled_count || 0) + Number(task.system_cleared_count || 0);
-    const typeLabel = task.type === "clearing" ? "Clearing task" : task.type === "move_pallets" ? "Move pallets" : "Audit task";
-    return `
-      <article class="empty-task-card ${_activeTask?.id === task.id ? "empty-task-card--active" : ""}">
-        <div class="empty-task-card__head">
-          <div>
-            <span class="empty-task-card__title">${escHtml(task.title)}</span>
-            <span class="empty-task-card__meta">${escHtml(typeLabel)} · ${escHtml(task.status)}</span>
-          </div>
-          ${chipStatus(task.status)}
-        </div>
-        <span class="empty-task-card__counts">${fmt(task.checked_count)} checked · ${fmt(task.pending_count)} pending · ${fmt(autoResolvedCount)} auto resolved</span>
-        <span class="empty-task-card__assignee">${task.assignee ? `Assigned to ${escHtml(task.assignee.name || task.assignee.email)}` : "Unassigned"}</span>
-        <div class="empty-task-card__actions">
-          <button class="btn btn--sm" data-empty-task-open="${escAttr(task.id)}">${task.type === "clearing" ? "Open task" : "Open audit"}</button>
-          <button class="btn btn--sm" data-empty-task-stop="${escAttr(task.id)}">Stop</button>
-          <button class="btn btn--sm" data-empty-task-delete="${escAttr(task.id)}">Delete</button>
-        </div>
-      </article>
-    `;
-  }).join("");
-}
-
-function summarizeClientTask(task) {
-  const items = task.items || [];
-  return {
-    checked_count: items.filter(item => item.status && item.status !== "pending" && item.status !== "system_cleared").length,
-    pending_count: items.filter(item => item.status === "pending").length,
-    system_cleared_count: items.filter(item => item.status === "system_cleared").length,
-    operations_filled_count: items.filter(item => item.status === "operations_filled").length,
-    photo_count: items.reduce((sum, item) => sum + ((item.photos || []).length), 0),
-  };
-}
-
-function taskControlsHtml(task, summary) {
-  const assigned = Boolean(task.assignee);
-  const typeLabel = task.type === "clearing" ? "Clearing task" : "Audit task";
-  const autoResolvedCount = Number(summary.operations_filled_count || 0) + Number(summary.system_cleared_count || 0);
-  return `
-    <div class="empty-task-controls">
-      <div>
-        <div class="empty-title">${escHtml(task.title)}</div>
-        <div class="empty-muted">${escHtml(typeLabel)} · ${fmt(summary.checked_count)} checked · ${fmt(summary.pending_count)} pending · ${fmt(autoResolvedCount)} auto resolved · ${fmt(summary.photo_count)} photos</div>
-      </div>
-      <div class="empty-task-actions">
-        <button class="btn btn--sm" data-task-action="assign">${assigned ? "Reassign to me" : "Assign to me"}</button>
-        <button class="btn btn--sm" data-task-action="drop">Drop task</button>
-        <button class="btn btn--sm" data-task-action="stop">Stop</button>
-        <button class="btn btn--sm" data-task-action="delete">Delete</button>
-        <button class="btn btn--primary btn--sm" data-task-action="complete">Complete</button>
-      </div>
-    </div>
-  `;
-}
-
-function renderTask() {
-  const el = document.getElementById("eTab-task");
-  if (!_activeTask) {
-    el.innerHTML = emptyState("Open or create a task to start checking locations.");
-    return;
-  }
-  const allItems = (_activeTask.items || []);
-  const autoResolved = allItems.filter(item => item.status === "system_cleared" || item.status === "operations_filled").length;
-  const items = allItems.filter(item => !["system_cleared", "operations_filled"].includes(item.status)).slice().sort((a, b) => {
-    const aPending = a.status === "pending" ? 0 : 1;
-    const bPending = b.status === "pending" ? 0 : 1;
-    return aPending - bPending || a.sort_index - b.sort_index;
-  });
-  const cards = items.map(renderCheckCard).join("");
-  const autoResolvedCopy = _activeTask.type === "clearing"
-    ? `${fmt(autoResolved)} locations were already filled in BINLOC and are marked as Operations filled in the report.`
-    : `${fmt(autoResolved)} locations were cleared by live BINLOC and are hidden from the checking queue. They remain in the report tab.`;
-  el.innerHTML = taskControlsHtml(_activeTask, _activeSummary || summarizeClientTask(_activeTask)) +
-    (autoResolved ? `<div class="empty-system-banner">${autoResolvedCopy}</div>` : "") +
-    `<div class="empty-check-list">${cards || emptyState("No pending locations remain in this task.")}</div>`;
-}
-
-function renderCheckCard(item) {
-  const pending = item.status === "pending";
-  const live = item.live || {};
-  const isClearingTask = _activeTask?.type === "clearing";
-  const actions = isClearingTask
-    ? [
-        ["cleared", "Cleared"],
-        ["skipped", "Skip"],
-      ]
-    : [
-        ["empty", "Empty"],
-        ["not_empty", "Not empty"],
-      ];
-  const photos = (item.photos || []).map((photo) =>
-    `<a class="empty-photo" href="${escAttr(photo.url)}" target="_blank" rel="noreferrer"><img src="${escAttr(photo.url)}" alt="Photo for ${escAttr(item.location)}" /></a>`
-  ).join("");
-  return `
-    <div class="empty-check-card empty-check-card--${escAttr(statusTone(item.status))}" data-location="${escAttr(item.location)}">
-      <div class="empty-check-card__top">
-        <div>
-          <div class="empty-location">${escHtml(item.location)}</div>
-          <div class="empty-last-transaction">${escHtml(formatLastTransaction(item.last_transaction))}</div>
-          <div class="empty-muted">${escHtml(item.operating_area || "-")} · ${escHtml(item.bin_size || "-")} · ${escHtml(item.bin_type || "-")} · level ${escHtml(item.level || "-")}</div>
-        </div>
-        ${chipStatus(item.status)}
-      </div>
-      <div class="empty-facts">
-        <span>Live qty ${fmt(live.current_qty ?? item.current_qty_at_create)}</span>
-        <span>Live SKU ${escHtml(live.item_sku || "-")}</span>
-        <span>${escHtml(isClearingTask ? (live.live_empty === false ? "Operations have filled the location" : "Still showing as empty") : (item.source_reason || "Awaiting audit"))}</span>
-      </div>
-      ${item.system_cleared_reason ? `<div class="empty-system-note">${escHtml(item.system_cleared_reason)}</div>` : ""}
-      ${item.note ? `<div class="empty-note">${escHtml(item.note)}</div>` : ""}
-      ${photos ? `<div class="empty-photo-row">${photos}</div>` : ""}
-      ${pending ? `
-        <div class="empty-card-inputs">
-          <textarea class="fi empty-note-input" placeholder="Optional note"></textarea>
-          <input class="fi empty-photo-input" type="file" accept="image/*" capture="environment" />
-        </div>
-        <div class="empty-card-actions empty-card-actions--${isClearingTask ? "two" : "two"}">
-          ${actions.map(([action, label]) => `<button class="btn btn--sm ${action === "empty" || action === "cleared" ? "btn--primary" : ""}" data-check-action="${escAttr(action)}">${escHtml(label)}</button>`).join("")}
-        </div>
-      ` : ""}
-    </div>
-  `;
-}
-
-async function handleTaskAction(action) {
-  if (!_activeTask) return;
-  const id = encodeURIComponent(_activeTask.id);
-
-  if (action === "delete") {
-    if (!window.confirm("Delete this task and its saved photos?")) return;
-    try {
-      await apiJson(`/api/empty-bin/tasks/${id}`, { method: "DELETE" });
-      _activeTask = null;
-      _activeSummary = null;
-      renderTask();
-      renderReport();
-      await loadTasks();
-      switchTab("live");
-      window.RepoApp?.toast?.("Task deleted.", "success");
-    } catch (err) {
-      window.RepoApp?.toast?.(err.message, "error");
-    }
-    return;
-  }
-
-  const endpoint = {
-    assign: `/api/empty-bin/tasks/${id}/assign`,
-    drop: `/api/empty-bin/tasks/${id}/drop`,
-    stop: `/api/empty-bin/tasks/${id}/stop`,
-    complete: `/api/empty-bin/tasks/${id}/complete`,
-    followup: `/api/empty-bin/tasks/${id}/create-followup`,
-  }[action];
-  if (!endpoint) return;
-  try {
-    const data = await apiJson(endpoint, { method: "POST", body: "{}" });
-    await loadTasks();
-    if (action === "complete" && data.full_clearing_task?.id) {
-      storeBootstrapTask(data.full_clearing_task.id, data.full_clearing_task, data.clearing_task);
-      await loadTask(data.full_clearing_task.id);
-      window.RepoApp?.toast?.("Audit completed and clearing task created.", "success");
-      return;
-    }
-    await loadTask(_activeTask.id, { silent: true });
-    if (action === "stop") window.RepoApp?.toast?.("Task stopped.", "success");
-  } catch (err) {
-    window.RepoApp?.toast?.(err.message, "error");
-  }
-}
-
-function renderTasks() {
-  const el = document.getElementById("eTaskList");
-  if (!_tasks.length) {
-    el.innerHTML = emptyState("No empty-bin tasks yet. Create one from the live report.");
+    el.innerHTML = emptyState("No empty-bin tasks yet. Create one from the daily report.");
     return;
   }
   el.innerHTML = _tasks.map((task) => {
@@ -877,6 +456,10 @@ function renderTasks() {
       </article>
     `;
   }).join("");
+}
+
+function summarizeClientTask(task) {
+  return computeTaskSummary(task);
 }
 
 function taskControlsHtml(task, summary) {
@@ -906,9 +489,9 @@ function renderTask() {
     el.innerHTML = emptyState("Open a task from the manager to review it here.");
     return;
   }
-  const allItems = (_activeTask.items || []);
-  const autoResolved = allItems.filter(item => item.status === "system_cleared" || item.status === "operations_filled").length;
-  const items = allItems.filter(item => !["system_cleared", "operations_filled"].includes(item.status)).slice().sort((a, b) => {
+  const allItems = _activeTask.items || [];
+  const autoResolved = allItems.filter((item) => ["system_cleared", "operations_filled"].includes(item.status)).length;
+  const items = allItems.filter((item) => !["system_cleared", "operations_filled"].includes(item.status)).slice().sort((a, b) => {
     const aPending = a.status === "pending" ? 0 : 1;
     const bPending = b.status === "pending" ? 0 : 1;
     return aPending - bPending || a.sort_index - b.sort_index;
@@ -927,14 +510,8 @@ function renderCheckCard(item) {
   const live = item.live || {};
   const isClearingTask = _activeTask?.type === "clearing";
   const actions = isClearingTask
-    ? [
-        ["cleared", "Cleared"],
-        ["skipped", "Skip"],
-      ]
-    : [
-        ["empty", "Empty"],
-        ["not_empty", "Not empty"],
-      ];
+    ? [["cleared", "Cleared"], ["skipped", "Skip"]]
+    : [["empty", "Empty"], ["not_empty", "Not empty"]];
   const photos = (item.photos || []).map((photo) =>
     `<a class="empty-photo" href="${escAttr(photo.url)}" target="_blank" rel="noreferrer"><img src="${escAttr(photo.url)}" alt="Photo for ${escAttr(item.location)}" /></a>`
   ).join("");
@@ -969,6 +546,94 @@ function renderCheckCard(item) {
   `;
 }
 
+function renderCompletedReport() {
+  const el = document.getElementById("eTab-report");
+  if (!_activeTask) {
+    el.innerHTML = emptyState("Open a task to view the full report.");
+    return;
+  }
+  const rows = _activeTask.items || [];
+  el.innerHTML = `
+    ${taskControlsHtml(_activeTask, _activeSummary || summarizeClientTask(_activeTask))}
+    <div class="empty-report-list">
+      ${rows.map(renderCompletedRow).join("")}
+    </div>
+  `;
+}
+
+function renderCompletedRow(item) {
+  const photos = (item.photos || []).map((photo) =>
+    `<a class="empty-photo" href="${escAttr(photo.url)}" target="_blank" rel="noreferrer"><img src="${escAttr(photo.url)}" alt="Photo for ${escAttr(item.location)}" /></a>`
+  ).join("");
+  return `
+    <div class="empty-report-row">
+      <div>
+        <div class="empty-location">${escHtml(item.location)}</div>
+        <div class="empty-last-transaction">${escHtml(formatLastTransaction(item.last_transaction))}</div>
+        <div class="empty-muted">${escHtml(item.operating_area || "-")} | ${escHtml(item.bin_size || "-")} | ${escHtml(item.bin_type || "-")}</div>
+        ${item.note ? `<div class="empty-note">${escHtml(item.note)}</div>` : ""}
+      </div>
+      <div>${chipStatus(item.status)}</div>
+      <div class="empty-photo-row">${photos || "<span class='empty-muted'>No photos</span>"}</div>
+    </div>
+  `;
+}
+
+function emptyState(message) {
+  return `<div class="empty-state"><div class="empty-state__title">Nothing here yet</div><div class="empty-state__desc">${escHtml(message)}</div></div>`;
+}
+
+function errorHtml(message) {
+  return `<div class="alert alert--error" style="margin:12px">${escHtml(message)}</div>`;
+}
+
+function switchTab(name) {
+  document.querySelectorAll("#eTabs .reports-tab-btn").forEach((btn) => {
+    const active = btn.dataset.tab === name;
+    btn.classList.toggle("reports-tab-btn--active", active);
+    btn.classList.toggle("tabbtn--on", active);
+  });
+  document.querySelectorAll("#eTab-daily,#eTab-task,#eTab-report").forEach((el) => {
+    el.classList.toggle("reports-tab-content--active", el.id === `eTab-${name}`);
+  });
+}
+
+async function createTaskFromFilters() {
+  if (!_report?.rows?.length) {
+    window.RepoApp?.toast?.("Load the daily empty-bin report first.", "error");
+    return;
+  }
+
+  setChip("eChipStatus", "Creating task...");
+  const filters = { date: selectedReportDate() };
+  if (selArea().value) filters.area = selArea().value;
+  if (selBinSize().value) filters.bin_size = selBinSize().value;
+  if (inpSearch().value.trim()) filters.search = inpSearch().value.trim();
+
+  try {
+    const created = await apiJson("/api/empty-bin/tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        client: selClient().value,
+        type: "empty_check",
+        title: `Daily empty bin check ${selectedReportDate()}`,
+        report_date: selectedReportDate(),
+        filters,
+        limit: selLimit().value,
+      }),
+    });
+    const assigned = await apiJson(`/api/empty-bin/tasks/${encodeURIComponent(created.task.id)}/assign`, {
+      method: "POST",
+      body: "{}",
+    });
+    storeBootstrapTask(created.task.id, assigned.task, assigned.summary);
+    window.location.href = `/empty-bins/tasks/${encodeURIComponent(created.task.id)}`;
+  } catch (err) {
+    window.RepoApp?.toast?.(err.message, "error");
+    setChip("eChipStatus", "Error");
+  }
+}
+
 async function handleTaskAction(action) {
   if (!_activeTask) return;
   const id = encodeURIComponent(_activeTask.id);
@@ -980,9 +645,9 @@ async function handleTaskAction(action) {
       _activeTask = null;
       _activeSummary = null;
       renderTask();
-      renderReport();
+      renderCompletedReport();
       await loadTasks();
-      switchTab("live");
+      switchTab("daily");
       window.RepoApp?.toast?.("Task deleted.", "success");
     } catch (err) {
       window.RepoApp?.toast?.(err.message, "error");
@@ -997,6 +662,7 @@ async function handleTaskAction(action) {
     complete: `/api/empty-bin/tasks/${id}/complete`,
   }[action];
   if (!endpoint) return;
+
   try {
     const data = await apiJson(endpoint, { method: "POST", body: "{}" });
     await loadTasks();
@@ -1009,11 +675,38 @@ async function handleTaskAction(action) {
       _activeTask = null;
       _activeSummary = null;
       renderTask();
-      switchTab("live");
+      renderCompletedReport();
+      switchTab("daily");
       window.RepoApp?.toast?.(action === "stop" ? "Task stopped." : "Task completed.", "success");
       return;
     }
-    await loadTask(_activeTask.id, { silent: true });
+    await loadTask(_activeTask.id, { silent: true, jump: false });
+  } catch (err) {
+    window.RepoApp?.toast?.(err.message, "error");
+  }
+}
+
+function readFileAsDataUrl(file) {
+  if (!file) return Promise.resolve("");
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not read image."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function submitCheck(card, action) {
+  const location = card.dataset.location;
+  const note = card.querySelector(".empty-note-input")?.value || "";
+  const file = card.querySelector(".empty-photo-input")?.files?.[0] || null;
+  const imageDataUrl = await readFileAsDataUrl(file);
+  try {
+    await apiJson(`/api/empty-bin/tasks/${encodeURIComponent(_activeTask.id)}/locations/${encodeURIComponent(location)}/check`, {
+      method: "POST",
+      body: JSON.stringify({ action, note, image_data_url: imageDataUrl }),
+    });
+    await loadTask(_activeTask.id, { silent: true, jump: false });
   } catch (err) {
     window.RepoApp?.toast?.(err.message, "error");
   }
@@ -1023,41 +716,48 @@ document.addEventListener("DOMContentLoaded", () => {
   if (inpDate() && !inpDate().value) inpDate().value = dateOffsetYmd(-1);
   setChip("eChipClient", selClient().options[selClient().selectedIndex]?.text || selClient().value);
   renderReportSyncStatus();
+  renderTask();
+  renderCompletedReport();
+  setCreateTaskEnabled(false);
   loadReportSyncStatus().catch(() => {});
-  loadLive();
+  loadSourceReport();
   loadTasks();
 
-  document.getElementById("eBtnLoadLive").addEventListener("click", () => {
+  document.getElementById("eBtnLoadReport").addEventListener("click", () => {
     loadReportSyncStatus().catch(() => {});
-    loadLive();
+    loadSourceReport();
   });
   document.getElementById("eBtnRequestReport").addEventListener("click", () => requestReportSync(false));
   document.getElementById("eBtnLoadTasks").addEventListener("click", loadTasks);
   document.getElementById("eBtnCreateTask").addEventListener("click", createTaskFromFilters);
+
   selClient().addEventListener("change", () => {
     setChip("eChipClient", selClient().options[selClient().selectedIndex]?.text || selClient().value);
     _activeTask = null;
     _reportSyncReadyToast = false;
     loadReportSyncStatus().catch(() => {});
-    loadLive();
+    loadSourceReport();
     loadTasks();
     renderTask();
-    renderReport();
+    renderCompletedReport();
   });
+
   inpDate()?.addEventListener("change", () => {
     _reportSyncReadyToast = false;
     loadReportSyncStatus().catch(() => {});
-    loadLive();
+    loadSourceReport();
   });
-  [selArea(), selBinSize(), selLimit()].forEach((el) => el?.addEventListener("change", loadLive));
+
+  [selArea(), selBinSize(), selLimit()].forEach((el) => el?.addEventListener("change", loadSourceReport));
   inpSearch().addEventListener("keydown", (event) => {
-    if (event.key === "Enter") loadLive();
+    if (event.key === "Enter") loadSourceReport();
   });
 
   document.getElementById("eTabs").addEventListener("click", (event) => {
     const btn = event.target.closest(".reports-tab-btn");
     if (btn) switchTab(btn.dataset.tab);
   });
+
   document.addEventListener("click", (event) => {
     const openTaskButton = event.target.closest("[data-empty-task-open]");
     if (openTaskButton) {
@@ -1065,6 +765,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (taskId) window.location.href = `/empty-bins/tasks/${encodeURIComponent(taskId)}`;
       return;
     }
+
     const stopTaskButton = event.target.closest("[data-empty-task-stop]");
     if (stopTaskButton) {
       const taskId = stopTaskButton.dataset.emptyTaskStop;
@@ -1075,6 +776,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       return;
     }
+
     const deleteTaskButton = event.target.closest("[data-empty-task-delete]");
     if (deleteTaskButton) {
       const taskId = deleteTaskButton.dataset.emptyTaskDelete;
@@ -1085,11 +787,13 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       return;
     }
+
     const taskAction = event.target.closest("[data-task-action]");
     if (taskAction) {
       handleTaskAction(taskAction.dataset.taskAction);
       return;
     }
+
     const checkButton = event.target.closest("[data-check-action]");
     if (checkButton) {
       const card = checkButton.closest("[data-location]");
