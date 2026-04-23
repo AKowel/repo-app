@@ -12,6 +12,7 @@ const COLLECTIONS = {
 
 const ITEM_CATALOG_SNAPSHOT_COLLECTION = "item_catalog_snapshots";
 const ITEM_CATALOG_IMAGE_COLLECTION = "item_catalog_images";
+const EMPTY_BINS_REPORT_SNAPSHOT_COLLECTION = "empty_bins_report_snapshots";
 
 const TTL_TODAY_MS = 5 * 60 * 1000;
 const TTL_HISTORIC_MS = 4 * 60 * 60 * 1000;
@@ -227,6 +228,61 @@ class SnapshotService {
     });
 
     return { snapshot, meta, fromCache: false };
+  }
+
+  async loadEmptyBinsReportSnapshot(clientCode = "FANDMKET", reportDate, { noCache = false } = {}) {
+    const targetClient = String(clientCode || "FANDMKET").trim().toUpperCase();
+    const targetDate = String(reportDate || todayYMD()).trim();
+    const cacheKey = `empty_bins_report::${targetClient}::${targetDate}`;
+
+    if (!noCache) {
+      const cached = this._cacheGet(cacheKey, targetDate);
+      if (cached) {
+        return { rows: cached.rows, meta: cached.meta, fromCache: true };
+      }
+    }
+
+    const response = await this.pb.listRecords(EMPTY_BINS_REPORT_SNAPSHOT_COLLECTION, {
+      filterExpr: `client_code=${pbLiteral(targetClient)} && report_date=${pbLiteral(targetDate)}`,
+      sort: "-uploaded_at",
+      perPage: 1,
+    }).catch(() => ({ items: [] }));
+
+    const record = (response.items || [])[0] || null;
+    if (!record) {
+      return { rows: [], meta: null, fromCache: false };
+    }
+
+    const rawFile = record.report_file || record.snapshot_file;
+    const fileName = Array.isArray(rawFile) ? rawFile[0] : rawFile;
+    if (!fileName) {
+      return { rows: [], meta: { ...record }, fromCache: false };
+    }
+
+    const fileResponse = await this.pb.proxyFile(
+      record.collectionId || record.collectionName || EMPTY_BINS_REPORT_SNAPSHOT_COLLECTION,
+      record.id,
+      fileName
+    );
+    const buffer = Buffer.from(await fileResponse.arrayBuffer());
+    const jsonBuffer = String(fileName).toLowerCase().endsWith(".gz") ? zlib.gunzipSync(buffer) : buffer;
+    const parsed = JSON.parse(jsonBuffer.toString("utf8"));
+    const rows = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.rows) ? parsed.rows : []);
+    const fileMeta = Array.isArray(parsed) ? {} : { ...parsed, rows: undefined };
+    const meta = {
+      client_code: record.client_code || fileMeta.client_code || targetClient,
+      report_date: record.report_date || fileMeta.report_date || targetDate,
+      row_count: Number(record.row_count ?? fileMeta.row_count ?? rows.length),
+      source: record.source || fileMeta.source || "",
+      uploaded_at: record.uploaded_at || fileMeta.uploaded_at || "",
+      source_synced_at: record.source_synced_at || fileMeta.source_synced_at || fileMeta.synced_at || "",
+      record_id: record.id || "",
+    };
+
+    if (!noCache) {
+      this.cache.set(cacheKey, { loadedAt: Date.now(), rows, meta });
+    }
+    return { rows, meta, fromCache: false };
   }
 
   async getSkuDetail(sku, clientCode = "FANDMKET") {

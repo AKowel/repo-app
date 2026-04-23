@@ -302,6 +302,7 @@ function getTransactionDate(row, fallbackDate = "") {
 function serializeEmptyBinTransaction(row, fallbackDate = "") {
   const location = getTransactionLocation(row);
   return {
+    source: "pick_transactions",
     snapshot_date: normalizeReportDate(fallbackDate),
     transaction_date: getTransactionDate(row, fallbackDate),
     order_number: String(row?.BTORDN || row?.order_number || "").trim(),
@@ -315,17 +316,63 @@ function serializeEmptyBinTransaction(row, fallbackDate = "") {
   };
 }
 
+function getEmptyBinsReportLocation(row) {
+  return normalizeEmptyBinLocation(row?.["Empty Bins"] || row?.Bin || row?.BLBINL || row?.location);
+}
+
+function serializeDailyEmptyBinReportTransaction(row, reportDate, clientCode = EMPTY_BIN_CLIENT_CODE) {
+  const selectedDate = normalizeReportDate(reportDate);
+  const user = String(row?.Last_User || row?.last_user || row?.user || "").trim();
+  return {
+    source: "daily_empty_bin_report",
+    snapshot_date: selectedDate,
+    transaction_date: selectedDate,
+    date_time: String(row?.Last_DateTime || row?.last_datetime || row?.date_time || "").trim(),
+    order_number: "",
+    client_code: normalizeClientCode(clientCode),
+    shipment: "",
+    picker: user,
+    user,
+    reason: String(row?.Last_Reason || row?.last_reason || row?.reason || "").trim(),
+    qty: Number(row?.Last_Qty || row?.last_qty || row?.qty || 0),
+    item: String(row?.Last_Item || row?.last_item || row?.item || row?.sku || "").trim().toUpperCase(),
+    location: getEmptyBinsReportLocation(row),
+  };
+}
+
 async function loadEmptyBinDayContext(client, reportDate) {
   const targetClient = normalizeClientCode(client || EMPTY_BIN_CLIENT_CODE);
   const selectedDate = normalizeReportDate(reportDate);
   const locations = new Set();
   const lastTransactions = new Map();
+  const reportLocations = new Set();
+  let reportMeta = null;
+  let reportFromCache = false;
+  let reportError = "";
   let trxMeta = null;
   let trxFromCache = false;
   let trxError = "";
 
   try {
-    const trx = await service.loadSnapshot("pick_transactions", targetClient, selectedDate, { noCache: true });
+    const report = await service.loadEmptyBinsReportSnapshot(targetClient, selectedDate, { noCache: true });
+    reportMeta = report.meta || null;
+    reportFromCache = Boolean(report.fromCache);
+    for (const row of (report.rows || [])) {
+      const location = getEmptyBinsReportLocation(row);
+      if (!location) continue;
+      reportLocations.add(location);
+      locations.add(location);
+      lastTransactions.set(location, serializeDailyEmptyBinReportTransaction(row, selectedDate, targetClient));
+    }
+  } catch (err) {
+    reportError = String(err.message || err);
+  }
+
+  try {
+    const shouldLoadPickTransactions = reportLocations.size === 0;
+    const trx = shouldLoadPickTransactions
+      ? await service.loadSnapshot("pick_transactions", targetClient, selectedDate, { noCache: true })
+      : { rows: [], meta: null, fromCache: false };
     trxMeta = trx.meta || null;
     trxFromCache = Boolean(trx.fromCache);
     for (const row of (trx.rows || [])) {
@@ -348,10 +395,15 @@ async function loadEmptyBinDayContext(client, reportDate) {
     compact_date: reportDateToCompact(selectedDate),
     client: targetClient,
     transaction_locations: locations,
+    report_locations: reportLocations,
     last_transactions: lastTransactions,
+    empty_bins_report_meta: reportMeta,
+    empty_bins_report_from_cache: reportFromCache,
+    empty_bins_report_error: reportError,
     pick_transaction_meta: trxMeta,
     pick_transaction_from_cache: trxFromCache,
     pick_transaction_error: trxError,
+    source_type: reportLocations.size ? "daily_empty_bin_report" : "binloc_last_move_out_or_pick_transactions",
   };
 }
 
@@ -359,6 +411,7 @@ function getEmptyBinDateReason(row, dayContext) {
   if (!dayContext) return "";
   const location = getBinlocLocation(row);
   if (!location) return "";
+  if (dayContext.report_locations?.has(location)) return "daily_empty_bin_report";
   const lastMoveOutCompact = normalizeCompactDate(row?.BLMDTO || row?.last_move_out_date || row?.["Last Move Date Out"]);
   const matchedMoveOut = lastMoveOutCompact && lastMoveOutCompact === dayContext.compact_date;
   const matchedTransaction = dayContext.transaction_locations?.has(location);
@@ -515,11 +568,28 @@ async function findRecentLocationTransactions(client, locations, maxDates = 14, 
 async function refreshEmptyBinTask(taskId) {
   const task = emptyBinTaskStore.getTask(taskId);
   if (!task) return null;
-  const live = await loadEmptyBinLiveIndex(task.client || DEFAULT_CLIENT);
+  const reportDate = task.filters?.report_date || (task.items || []).find(item => item.report_date)?.report_date || "";
+  const locations = (task.items || []).map(item => item.location);
+  const [live, dayContext] = await Promise.all([
+    loadEmptyBinLiveIndex(task.client || DEFAULT_CLIENT),
+    reportDate
+      ? loadEmptyBinDayContext(task.client || DEFAULT_CLIENT, reportDate).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+  const fallbackTransactions = (!dayContext || dayContext.last_transactions.size < locations.length)
+    ? await findRecentLocationTransactions(
+        task.client || DEFAULT_CLIENT,
+        locations,
+        reportDate ? 1 : 14,
+        reportDate
+      )
+    : new Map();
   const updatedTask = emptyBinTaskStore.updateTask(taskId, (existingTask) => {
     for (const item of (existingTask.items || [])) {
-      const current = live.liveByLocation.get(normalizeEmptyBinLocation(item.location)) || null;
+      const location = normalizeEmptyBinLocation(item.location);
+      const current = live.liveByLocation.get(location) || null;
       item.live = current;
+      item.last_transaction = dayContext?.last_transactions?.get(location) || fallbackTransactions.get(location) || item.last_transaction || null;
       if (item.status === "pending" && (!current || !current.live_empty)) {
         item.status = "system_cleared";
         item.result = "system_cleared";
@@ -538,16 +608,6 @@ async function refreshEmptyBinTask(taskId) {
     }
     return existingTask;
   });
-  const reportDate = task.filters?.report_date || (task.items || []).find(item => item.report_date)?.report_date || "";
-  const trxMap = await findRecentLocationTransactions(
-    task.client || DEFAULT_CLIENT,
-    (updatedTask.items || []).map(item => item.location),
-    reportDate ? 1 : 14,
-    reportDate
-  );
-  for (const item of (updatedTask.items || [])) {
-    item.last_transaction = trxMap.get(normalizeEmptyBinLocation(item.location)) || item.last_transaction || null;
-  }
   return { task: updatedTask, live_meta: live.meta, live_filters: live.filters };
 }
 
@@ -3780,7 +3840,11 @@ app.get("/api/empty-bin/live", requireAdminApi, async (req, res) => {
         from_cache: live.fromCache,
         filters: buildEmptyBinFilterOptions(optionRows),
         day_source: {
-          type: "binloc_last_move_out_or_pick_transactions",
+          type: dayContext.source_type || "binloc_last_move_out_or_pick_transactions",
+          empty_bins_report_row_count: dayContext.empty_bins_report_meta?.row_count ?? null,
+          empty_bins_report_locations: dayContext.report_locations?.size || 0,
+          empty_bins_report_from_cache: dayContext.empty_bins_report_from_cache,
+          empty_bins_report_error: dayContext.empty_bins_report_error,
           pick_transaction_row_count: dayContext.pick_transaction_meta?.row_count ?? null,
           pick_transaction_locations: dayContext.transaction_locations.size,
           pick_transaction_from_cache: dayContext.pick_transaction_from_cache,
@@ -3843,7 +3907,7 @@ app.post("/api/empty-bin/tasks", requireAdminApi, async (req, res) => {
       filters: requestedLocations.length
         ? { selected_locations: requestedLocations, report_date: reportDate }
         : { ...filters, report_date: reportDate },
-      snapshotMeta: { ...(live.meta || {}), report_date: reportDate, day_source: "binloc_last_move_out_or_pick_transactions" },
+      snapshotMeta: { ...(live.meta || {}), report_date: reportDate, day_source: dayContext.source_type || "binloc_last_move_out_or_pick_transactions" },
       items: rows,
     });
     return res.json({ ok: true, task: summarizeEmptyBinTask(task), full_task: task });

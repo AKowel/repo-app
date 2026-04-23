@@ -6,8 +6,12 @@ let auditItems = [];
 let currentIndex = 0;
 let busy = false;
 let pollTimer = null;
+let preparedPhoto = null;
+let photoPreparePromise = null;
 
 const TASK_ID = window.EMPTY_BIN_TASK_ID || "";
+const PHOTO_MAX_DIMENSION = 1600;
+const PHOTO_JPEG_QUALITY = 0.72;
 
 function $(id) {
   return document.getElementById(id);
@@ -58,12 +62,15 @@ function statusTone(status) {
 
 function formatLastTransaction(tx) {
   if (!tx) return "Last transaction: none found";
-  const date = tx.transaction_date || tx.snapshot_date || "";
-  const item = tx.item || "-";
-  const qty = fmt(tx.qty || 0);
+  const date = tx.date_time || tx.Last_DateTime || tx.transaction_date || tx.snapshot_date || "";
+  const item = tx.item || tx.Last_Item || "-";
+  const qty = fmt(tx.qty ?? tx.Last_Qty ?? 0);
+  const reasonValue = tx.reason || tx.Last_Reason || "";
+  const reason = reasonValue ? ` | reason ${reasonValue}` : "";
   const order = tx.order_number ? ` | order ${tx.order_number}` : "";
-  const user = tx.picker ? ` | by ${tx.picker}` : "";
-  return `Last transaction: ${date || "-"} | ${item} | qty ${qty}${order}${user}`;
+  const userValue = tx.user || tx.Last_User || tx.picker || "";
+  const user = userValue ? ` | user ${userValue}` : "";
+  return `Last transaction: ${date || "-"} | ${item} | qty ${qty}${reason}${order}${user}`;
 }
 
 async function apiJson(url, options = {}) {
@@ -143,6 +150,119 @@ function renderPhotos(item) {
   `;
 }
 
+function resetPreparedPhoto(location = "") {
+  preparedPhoto = location ? { location, dataUrl: "", timestamp: "" } : null;
+  photoPreparePromise = null;
+}
+
+function setPhotoStatus(message, tone = "") {
+  const status = $("auditPhotoStatus");
+  if (!status) return;
+  status.textContent = message || "";
+  status.dataset.tone = tone || "";
+}
+
+function renderPhotoPreview(dataUrl) {
+  const preview = $("auditPhotoPreview");
+  if (!preview) return;
+  preview.innerHTML = dataUrl
+    ? `<img src="${escAttr(dataUrl)}" alt="Compressed audit photo preview">`
+    : "";
+}
+
+function formatPhotoTimestamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+  ].join(" ");
+}
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not load the selected photo."));
+    };
+    image.src = url;
+  });
+}
+
+async function compressPhotoWithTimestamp(file) {
+  if (!file) return null;
+  const image = await loadImageFromFile(file);
+  const sourceWidth = image.naturalWidth || image.width || 1;
+  const sourceHeight = image.naturalHeight || image.height || 1;
+  const scale = Math.min(1, PHOTO_MAX_DIMENSION / Math.max(sourceWidth, sourceHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("This browser could not prepare the photo.");
+
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  const timestamp = formatPhotoTimestamp();
+  const fontSize = Math.max(22, Math.round(canvas.width * 0.026));
+  const padding = Math.round(fontSize * 0.55);
+  ctx.font = `700 ${fontSize}px Arial, sans-serif`;
+  const metrics = ctx.measureText(timestamp);
+  const boxWidth = Math.ceil(metrics.width + padding * 2);
+  const boxHeight = Math.ceil(fontSize + padding * 1.8);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.62)";
+  ctx.fillRect(0, 0, boxWidth, boxHeight);
+  ctx.fillStyle = "#fff";
+  ctx.textBaseline = "top";
+  ctx.fillText(timestamp, padding, padding * 0.8);
+
+  return {
+    dataUrl: canvas.toDataURL("image/jpeg", PHOTO_JPEG_QUALITY),
+    timestamp,
+  };
+}
+
+function prepareAuditPhoto(file, location) {
+  const activeLocation = String(location || "").trim().toUpperCase();
+  if (!file || !activeLocation) {
+    resetPreparedPhoto(activeLocation);
+    renderPhotoPreview("");
+    setPhotoStatus("No photo attached");
+    return Promise.resolve(null);
+  }
+
+  preparedPhoto = { location: activeLocation, dataUrl: "", timestamp: "" };
+  renderPhotoPreview("");
+  setPhotoStatus("Compressing photo...", "busy");
+  photoPreparePromise = compressPhotoWithTimestamp(file)
+    .then((result) => {
+      preparedPhoto = {
+        location: activeLocation,
+        dataUrl: result?.dataUrl || "",
+        timestamp: result?.timestamp || "",
+      };
+      if (currentItem()?.location === activeLocation) {
+        renderPhotoPreview(preparedPhoto.dataUrl);
+        setPhotoStatus(preparedPhoto.timestamp ? `Photo ready | ${preparedPhoto.timestamp}` : "Photo ready", "ready");
+      }
+      return preparedPhoto;
+    })
+    .catch((err) => {
+      if (currentItem()?.location === activeLocation) {
+        renderPhotoPreview("");
+        setPhotoStatus(err.message || "Photo could not be prepared.", "error");
+      }
+      preparedPhoto = null;
+      throw err;
+    });
+  return photoPreparePromise;
+}
+
 function currentItem() {
   if (!auditItems.length) return null;
   currentIndex = Math.max(0, Math.min(currentIndex, auditItems.length - 1));
@@ -171,6 +291,9 @@ function renderCurrent() {
     renderComplete();
     return;
   }
+  if (preparedPhoto?.location !== item.location) {
+    resetPreparedPhoto(item.location);
+  }
 
   const pending = item.status === "pending";
   const live = item.live || {};
@@ -187,6 +310,10 @@ function renderCurrent() {
         ["empty_pallet", "Empty pallet"],
         ["needs_move", "Needs move"],
       ];
+  const photoReady = preparedPhoto?.location === item.location && preparedPhoto.dataUrl;
+  const photoStatusText = photoReady && preparedPhoto.timestamp
+    ? `Photo ready | ${preparedPhoto.timestamp}`
+    : "No photo attached";
 
   $("auditMain").innerHTML = `
     <section class="audit-card" data-current-location="${escAttr(item.location)}">
@@ -214,7 +341,12 @@ function renderCurrent() {
       ${pending ? `
         <div class="audit-inputs">
           <textarea class="fi audit-note" id="auditNote" placeholder="Optional note"></textarea>
-          <input class="fi" id="auditPhoto" type="file" accept="image/*" capture="environment" />
+          <div class="audit-photo-picker">
+            <button class="audit-camera-btn" type="button" data-photo-trigger>Take photo</button>
+            <input id="auditPhoto" type="file" accept="image/*" capture="environment" hidden />
+            <div class="audit-photo-status" id="auditPhotoStatus" data-tone="${photoReady ? "ready" : ""}">${escHtml(photoStatusText)}</div>
+            <div class="audit-photo-preview" id="auditPhotoPreview">${photoReady ? `<img src="${escAttr(preparedPhoto.dataUrl)}" alt="Compressed audit photo preview">` : ""}</div>
+          </div>
         </div>
         <div class="audit-actions">
           ${actions.map(([action, label]) => `<button class="audit-action ${action === "empty" || action === "moved" ? "audit-action--primary" : ""}" data-check-action="${escAttr(action)}">${escHtml(label)}</button>`).join("")}
@@ -278,25 +410,17 @@ async function loadTask({ keepIndex = false, advanceAfterLocation = "" } = {}) {
   renderCurrent();
 }
 
-function readFileAsDataUrl(file) {
-  if (!file) return Promise.resolve("");
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("Could not read image."));
-    reader.readAsDataURL(file);
-  });
-}
-
 async function submitCheck(action) {
   if (busy) return;
   const item = currentItem();
   if (!item || item.status !== "pending") return;
   busy = true;
   const note = $("auditNote")?.value || "";
-  const file = $("auditPhoto")?.files?.[0] || null;
   try {
-    const imageDataUrl = await readFileAsDataUrl(file);
+    if (photoPreparePromise) {
+      await photoPreparePromise;
+    }
+    const imageDataUrl = preparedPhoto?.location === item.location ? preparedPhoto.dataUrl : "";
     await apiJson(`/api/empty-bin/tasks/${encodeURIComponent(TASK_ID)}/locations/${encodeURIComponent(item.location)}/check`, {
       method: "POST",
       body: JSON.stringify({ action, note, image_data_url: imageDataUrl }),
@@ -341,6 +465,12 @@ function moveIndex(delta) {
 }
 
 document.addEventListener("click", (event) => {
+  const photoButton = event.target.closest("[data-photo-trigger]");
+  if (photoButton) {
+    $("auditPhoto")?.click();
+    return;
+  }
+
   const checkButton = event.target.closest("[data-check-action]");
   if (checkButton) {
     submitCheck(checkButton.dataset.checkAction);
@@ -370,6 +500,13 @@ document.addEventListener("click", (event) => {
   if (taskButton) {
     handleTaskAction(taskButton.dataset.taskAction);
   }
+});
+
+document.addEventListener("change", (event) => {
+  if (event.target?.id !== "auditPhoto") return;
+  const item = currentItem();
+  const file = event.target.files?.[0] || null;
+  prepareAuditPhoto(file, item?.location || "").catch(() => {});
 });
 
 document.addEventListener("DOMContentLoaded", () => {

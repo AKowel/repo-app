@@ -69,12 +69,15 @@ function chipStatus(status) {
 
 function formatLastTransaction(tx) {
   if (!tx) return "Last transaction: none found";
-  const date = tx.transaction_date || tx.snapshot_date || "";
-  const item = tx.item || "-";
-  const qty = fmt(tx.qty || 0);
-  const order = tx.order_number ? ` · order ${tx.order_number}` : "";
-  const user = tx.picker ? ` · by ${tx.picker}` : "";
-  return `Last transaction: ${date || "-"} · ${item} · qty ${qty}${order}${user}`;
+  const date = tx.date_time || tx.Last_DateTime || tx.transaction_date || tx.snapshot_date || "";
+  const item = tx.item || tx.Last_Item || "-";
+  const qty = fmt(tx.qty ?? tx.Last_Qty ?? 0);
+  const reasonValue = tx.reason || tx.Last_Reason || "";
+  const reason = reasonValue ? ` | reason ${reasonValue}` : "";
+  const order = tx.order_number ? ` | order ${tx.order_number}` : "";
+  const userValue = tx.user || tx.Last_User || tx.picker || "";
+  const user = userValue ? ` | user ${userValue}` : "";
+  return `Last transaction: ${date || "-"} | ${item} | qty ${qty}${reason}${order}${user}`;
 }
 
 function dateOffsetYmd(offsetDays) {
@@ -199,14 +202,18 @@ function renderLive() {
   const rows = _live?.rows || [];
   const meta = _live?.meta || {};
   const daySource = meta.day_source || {};
+  const daySourceText = daySource.type === "daily_empty_bin_report"
+    ? `${fmt(daySource.empty_bins_report_locations || 0)} daily report locations`
+    : `${fmt(daySource.pick_transaction_locations || 0)} same-day pick locations`;
   const html = `
     <div class="empty-live-head">
       <div>
         <div class="empty-title">FANDMKET empty locations for ${escHtml(meta.report_date || selectedReportDate())}</div>
-        <div class="empty-muted">BINLOC ${escHtml(meta.snapshot_date || "latest")} &middot; synced ${escHtml(meta.source_synced_at || "-")} &middot; ${fmt(daySource.pick_transaction_locations || 0)} same-day pick locations</div>
+        <div class="empty-muted">BINLOC ${escHtml(meta.snapshot_date || "latest")} &middot; synced ${escHtml(meta.source_synced_at || "-")} &middot; ${escHtml(daySourceText)}</div>
       </div>
       <button class="btn btn--primary btn--sm" id="eBtnCreateTaskInline">Create task from this view</button>
     </div>
+    ${daySource.empty_bins_report_error ? `<div class="empty-system-banner">Daily empty-bin report snapshot was not available: ${escHtml(daySource.empty_bins_report_error)}.</div>` : ""}
     ${daySource.pick_transaction_error ? `<div class="empty-system-banner">Pick transaction snapshot was not available: ${escHtml(daySource.pick_transaction_error)}. BINLOC last-move-out dates are still being used.</div>` : ""}
     ${rows.length ? `<div class="empty-live-list">${rows.map(renderLiveRow).join("")}</div>` : emptyState("No FANDMKET locations that went empty on this date are still empty in live BINLOC.")}
   `;
