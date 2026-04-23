@@ -485,14 +485,17 @@ async function loadEmptyBinLiveIndex(client) {
   };
 }
 
-async function findRecentLocationTransactions(client, locations, maxDates = 14) {
+async function findRecentLocationTransactions(client, locations, maxDates = 14, preferredDate = "") {
   const locSet = new Set([...locations].map(normalizeEmptyBinLocation).filter(Boolean));
   const found = new Map();
   if (!locSet.size) return found;
-  const trxDates = (await service.listSnapshotDates("pick_transactions", client).catch(() => []))
-    .filter(Boolean)
-    .sort()
-    .reverse();
+  const preferred = String(preferredDate || "").trim() ? normalizeReportDate(preferredDate) : "";
+  const trxDates = preferred
+    ? [preferred]
+    : (await service.listSnapshotDates("pick_transactions", client).catch(() => []))
+      .filter(Boolean)
+      .sort()
+      .reverse();
   for (const trxDate of trxDates.slice(0, maxDates)) {
     const { rows = [] } = await service.loadSnapshot("pick_transactions", client, trxDate).catch(() => ({ rows: [] }));
     for (const row of rows) {
@@ -535,7 +538,13 @@ async function refreshEmptyBinTask(taskId) {
     }
     return existingTask;
   });
-  const trxMap = await findRecentLocationTransactions(task.client || DEFAULT_CLIENT, (updatedTask.items || []).map(item => item.location), 14);
+  const reportDate = task.filters?.report_date || (task.items || []).find(item => item.report_date)?.report_date || "";
+  const trxMap = await findRecentLocationTransactions(
+    task.client || DEFAULT_CLIENT,
+    (updatedTask.items || []).map(item => item.location),
+    reportDate ? 1 : 14,
+    reportDate
+  );
   for (const item of (updatedTask.items || [])) {
     item.last_transaction = trxMap.get(normalizeEmptyBinLocation(item.location)) || item.last_transaction || null;
   }

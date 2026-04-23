@@ -109,7 +109,13 @@ async function apiJson(url, options = {}) {
       ...(options.headers || {}),
     },
   });
-  const json = await resp.json();
+  const text = await resp.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(text || `Request failed with ${resp.status}.`);
+  }
   if (!json.ok) throw new Error(json.error || "Request failed.");
   return json;
 }
@@ -152,15 +158,22 @@ async function loadTasks() {
 }
 
 async function loadTask(taskId, { silent = false } = {}) {
-  if (!silent) setChip("eChipStatus", "Loading task...");
-  const data = await apiJson(`/api/empty-bin/tasks/${encodeURIComponent(taskId)}`);
-  _activeTask = data.task;
-  _activeSummary = data.summary;
-  renderTask();
-  renderReport();
-  switchTab("task");
-  if (!silent) setChip("eChipStatus", "Task loaded");
-  startPolling();
+  try {
+    if (!silent) setChip("eChipStatus", "Loading task...");
+    const data = await apiJson(`/api/empty-bin/tasks/${encodeURIComponent(taskId)}`);
+    _activeTask = data.task;
+    _activeSummary = data.summary;
+    renderTask();
+    renderReport();
+    switchTab("task");
+    if (!silent) setChip("eChipStatus", "Task loaded");
+    startPolling();
+  } catch (err) {
+    setChip("eChipStatus", "Task failed to load");
+    document.getElementById("eTab-task").innerHTML = errorHtml(err.message);
+    switchTab("task");
+    throw err;
+  }
 }
 
 function startPolling() {
