@@ -84,6 +84,9 @@ function statusLabel(status) {
     pending: "Pending",
     checked_empty: "Empty",
     checked_not_empty: "Not empty",
+    cleared: "Cleared",
+    operations_filled: "Operations filled",
+    stopped: "Stopped",
     empty_pallet: "Empty pallet",
     move_required: "Needs move",
     moved: "Moved",
@@ -97,7 +100,7 @@ function statusLabel(status) {
 function statusTone(status) {
   if (status === "pending") return "pending";
   if (status === "system_cleared") return "system";
-  if (status === "checked_empty" || status === "empty_pallet" || status === "moved") return "good";
+  if (status === "checked_empty" || status === "empty_pallet" || status === "moved" || status === "cleared" || status === "operations_filled") return "good";
   if (status === "checked_not_empty" || status === "cannot_complete") return "bad";
   return "warn";
 }
@@ -669,6 +672,353 @@ async function submitCheck(card, action) {
   }
 }
 
+function renderTasks() {
+  const el = document.getElementById("eTaskList");
+  if (!_tasks.length) {
+    el.innerHTML = emptyState("No empty-bin tasks yet. Create one from the live report.");
+    return;
+  }
+  el.innerHTML = _tasks.map((task) => {
+    const autoResolvedCount = Number(task.operations_filled_count || 0) + Number(task.system_cleared_count || 0);
+    const typeLabel = task.type === "clearing" ? "Clearing task" : task.type === "move_pallets" ? "Move pallets" : "Audit task";
+    return `
+      <article class="empty-task-card ${_activeTask?.id === task.id ? "empty-task-card--active" : ""}">
+        <div class="empty-task-card__head">
+          <div>
+            <span class="empty-task-card__title">${escHtml(task.title)}</span>
+            <span class="empty-task-card__meta">${escHtml(typeLabel)} · ${escHtml(task.status)}</span>
+          </div>
+          ${chipStatus(task.status)}
+        </div>
+        <span class="empty-task-card__counts">${fmt(task.checked_count)} checked · ${fmt(task.pending_count)} pending · ${fmt(autoResolvedCount)} auto resolved</span>
+        <span class="empty-task-card__assignee">${task.assignee ? `Assigned to ${escHtml(task.assignee.name || task.assignee.email)}` : "Unassigned"}</span>
+        <div class="empty-task-card__actions">
+          <button class="btn btn--sm" data-empty-task-open="${escAttr(task.id)}">${task.type === "clearing" ? "Open task" : "Open audit"}</button>
+          <button class="btn btn--sm" data-empty-task-stop="${escAttr(task.id)}">Stop</button>
+          <button class="btn btn--sm" data-empty-task-delete="${escAttr(task.id)}">Delete</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function summarizeClientTask(task) {
+  const items = task.items || [];
+  return {
+    checked_count: items.filter(item => item.status && item.status !== "pending" && item.status !== "system_cleared").length,
+    pending_count: items.filter(item => item.status === "pending").length,
+    system_cleared_count: items.filter(item => item.status === "system_cleared").length,
+    operations_filled_count: items.filter(item => item.status === "operations_filled").length,
+    photo_count: items.reduce((sum, item) => sum + ((item.photos || []).length), 0),
+  };
+}
+
+function taskControlsHtml(task, summary) {
+  const assigned = Boolean(task.assignee);
+  const typeLabel = task.type === "clearing" ? "Clearing task" : "Audit task";
+  const autoResolvedCount = Number(summary.operations_filled_count || 0) + Number(summary.system_cleared_count || 0);
+  return `
+    <div class="empty-task-controls">
+      <div>
+        <div class="empty-title">${escHtml(task.title)}</div>
+        <div class="empty-muted">${escHtml(typeLabel)} · ${fmt(summary.checked_count)} checked · ${fmt(summary.pending_count)} pending · ${fmt(autoResolvedCount)} auto resolved · ${fmt(summary.photo_count)} photos</div>
+      </div>
+      <div class="empty-task-actions">
+        <button class="btn btn--sm" data-task-action="assign">${assigned ? "Reassign to me" : "Assign to me"}</button>
+        <button class="btn btn--sm" data-task-action="drop">Drop task</button>
+        <button class="btn btn--sm" data-task-action="stop">Stop</button>
+        <button class="btn btn--sm" data-task-action="delete">Delete</button>
+        <button class="btn btn--primary btn--sm" data-task-action="complete">Complete</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderTask() {
+  const el = document.getElementById("eTab-task");
+  if (!_activeTask) {
+    el.innerHTML = emptyState("Open or create a task to start checking locations.");
+    return;
+  }
+  const allItems = (_activeTask.items || []);
+  const autoResolved = allItems.filter(item => item.status === "system_cleared" || item.status === "operations_filled").length;
+  const items = allItems.filter(item => !["system_cleared", "operations_filled"].includes(item.status)).slice().sort((a, b) => {
+    const aPending = a.status === "pending" ? 0 : 1;
+    const bPending = b.status === "pending" ? 0 : 1;
+    return aPending - bPending || a.sort_index - b.sort_index;
+  });
+  const cards = items.map(renderCheckCard).join("");
+  const autoResolvedCopy = _activeTask.type === "clearing"
+    ? `${fmt(autoResolved)} locations were already filled in BINLOC and are marked as Operations filled in the report.`
+    : `${fmt(autoResolved)} locations were cleared by live BINLOC and are hidden from the checking queue. They remain in the report tab.`;
+  el.innerHTML = taskControlsHtml(_activeTask, _activeSummary || summarizeClientTask(_activeTask)) +
+    (autoResolved ? `<div class="empty-system-banner">${autoResolvedCopy}</div>` : "") +
+    `<div class="empty-check-list">${cards || emptyState("No pending locations remain in this task.")}</div>`;
+}
+
+function renderCheckCard(item) {
+  const pending = item.status === "pending";
+  const live = item.live || {};
+  const isClearingTask = _activeTask?.type === "clearing";
+  const actions = isClearingTask
+    ? [
+        ["cleared", "Cleared"],
+        ["skipped", "Skip"],
+      ]
+    : [
+        ["empty", "Empty"],
+        ["not_empty", "Not empty"],
+      ];
+  const photos = (item.photos || []).map((photo) =>
+    `<a class="empty-photo" href="${escAttr(photo.url)}" target="_blank" rel="noreferrer"><img src="${escAttr(photo.url)}" alt="Photo for ${escAttr(item.location)}" /></a>`
+  ).join("");
+  return `
+    <div class="empty-check-card empty-check-card--${escAttr(statusTone(item.status))}" data-location="${escAttr(item.location)}">
+      <div class="empty-check-card__top">
+        <div>
+          <div class="empty-location">${escHtml(item.location)}</div>
+          <div class="empty-last-transaction">${escHtml(formatLastTransaction(item.last_transaction))}</div>
+          <div class="empty-muted">${escHtml(item.operating_area || "-")} · ${escHtml(item.bin_size || "-")} · ${escHtml(item.bin_type || "-")} · level ${escHtml(item.level || "-")}</div>
+        </div>
+        ${chipStatus(item.status)}
+      </div>
+      <div class="empty-facts">
+        <span>Live qty ${fmt(live.current_qty ?? item.current_qty_at_create)}</span>
+        <span>Live SKU ${escHtml(live.item_sku || "-")}</span>
+        <span>${escHtml(isClearingTask ? (live.live_empty === false ? "Operations have filled the location" : "Still showing as empty") : (item.source_reason || "Awaiting audit"))}</span>
+      </div>
+      ${item.system_cleared_reason ? `<div class="empty-system-note">${escHtml(item.system_cleared_reason)}</div>` : ""}
+      ${item.note ? `<div class="empty-note">${escHtml(item.note)}</div>` : ""}
+      ${photos ? `<div class="empty-photo-row">${photos}</div>` : ""}
+      ${pending ? `
+        <div class="empty-card-inputs">
+          <textarea class="fi empty-note-input" placeholder="Optional note"></textarea>
+          <input class="fi empty-photo-input" type="file" accept="image/*" capture="environment" />
+        </div>
+        <div class="empty-card-actions empty-card-actions--${isClearingTask ? "two" : "two"}">
+          ${actions.map(([action, label]) => `<button class="btn btn--sm ${action === "empty" || action === "cleared" ? "btn--primary" : ""}" data-check-action="${escAttr(action)}">${escHtml(label)}</button>`).join("")}
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+async function handleTaskAction(action) {
+  if (!_activeTask) return;
+  const id = encodeURIComponent(_activeTask.id);
+
+  if (action === "delete") {
+    if (!window.confirm("Delete this task and its saved photos?")) return;
+    try {
+      await apiJson(`/api/empty-bin/tasks/${id}`, { method: "DELETE" });
+      _activeTask = null;
+      _activeSummary = null;
+      renderTask();
+      renderReport();
+      await loadTasks();
+      switchTab("live");
+      window.RepoApp?.toast?.("Task deleted.", "success");
+    } catch (err) {
+      window.RepoApp?.toast?.(err.message, "error");
+    }
+    return;
+  }
+
+  const endpoint = {
+    assign: `/api/empty-bin/tasks/${id}/assign`,
+    drop: `/api/empty-bin/tasks/${id}/drop`,
+    stop: `/api/empty-bin/tasks/${id}/stop`,
+    complete: `/api/empty-bin/tasks/${id}/complete`,
+    followup: `/api/empty-bin/tasks/${id}/create-followup`,
+  }[action];
+  if (!endpoint) return;
+  try {
+    const data = await apiJson(endpoint, { method: "POST", body: "{}" });
+    await loadTasks();
+    if (action === "complete" && data.full_clearing_task?.id) {
+      storeBootstrapTask(data.full_clearing_task.id, data.full_clearing_task, data.clearing_task);
+      await loadTask(data.full_clearing_task.id);
+      window.RepoApp?.toast?.("Audit completed and clearing task created.", "success");
+      return;
+    }
+    await loadTask(_activeTask.id, { silent: true });
+    if (action === "stop") window.RepoApp?.toast?.("Task stopped.", "success");
+  } catch (err) {
+    window.RepoApp?.toast?.(err.message, "error");
+  }
+}
+
+function renderTasks() {
+  const el = document.getElementById("eTaskList");
+  if (!_tasks.length) {
+    el.innerHTML = emptyState("No empty-bin tasks yet. Create one from the live report.");
+    return;
+  }
+  el.innerHTML = _tasks.map((task) => {
+    const autoResolvedCount = Number(task.operations_filled_count || 0) + Number(task.system_cleared_count || 0);
+    const typeLabel = task.type === "clearing" ? "Clearing task" : "Audit task";
+    const stopLabel = task.status === "stopped" ? "Stopped" : "Stop";
+    return `
+      <article class="empty-task-card ${_activeTask?.id === task.id ? "empty-task-card--active" : ""}">
+        <div class="empty-task-card__head">
+          <div>
+            <span class="empty-task-card__title">${escHtml(task.title)}</span>
+            <span class="empty-task-card__meta">${escHtml(typeLabel)} | ${escHtml(task.status)}</span>
+          </div>
+          ${chipStatus(task.status)}
+        </div>
+        <span class="empty-task-card__counts">${fmt(task.checked_count)} checked | ${fmt(task.pending_count)} pending | ${fmt(autoResolvedCount)} auto resolved</span>
+        <span class="empty-task-card__assignee">${task.assignee ? `Assigned to ${escHtml(task.assignee.name || task.assignee.email)}` : "Unassigned"}</span>
+        <div class="empty-task-card__actions">
+          <button class="btn btn--sm" data-empty-task-open="${escAttr(task.id)}">${task.type === "clearing" ? "Open clearing" : "Open audit"}</button>
+          <button class="btn btn--sm" data-empty-task-stop="${escAttr(task.id)}">${escHtml(stopLabel)}</button>
+          <button class="btn btn--sm" data-empty-task-delete="${escAttr(task.id)}">Delete</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function taskControlsHtml(task, summary) {
+  const assigned = Boolean(task.assignee);
+  const typeLabel = task.type === "clearing" ? "Clearing task" : "Audit task";
+  const autoResolvedCount = Number(summary.operations_filled_count || 0) + Number(summary.system_cleared_count || 0);
+  return `
+    <div class="empty-task-controls">
+      <div>
+        <div class="empty-title">${escHtml(task.title)}</div>
+        <div class="empty-muted">${escHtml(typeLabel)} | ${fmt(summary.checked_count)} checked | ${fmt(summary.pending_count)} pending | ${fmt(autoResolvedCount)} auto resolved | ${fmt(summary.photo_count)} photos</div>
+      </div>
+      <div class="empty-task-actions">
+        <button class="btn btn--sm" data-task-action="assign">${assigned ? "Reassign to me" : "Assign to me"}</button>
+        <button class="btn btn--sm" data-task-action="drop">Drop task</button>
+        <button class="btn btn--sm" data-task-action="stop">Stop</button>
+        <button class="btn btn--sm" data-task-action="delete">Delete</button>
+        <button class="btn btn--primary btn--sm" data-task-action="complete">${task.type === "clearing" ? "Finish" : "Complete"}</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderTask() {
+  const el = document.getElementById("eTab-task");
+  if (!_activeTask) {
+    el.innerHTML = emptyState("Open a task from the manager to review it here.");
+    return;
+  }
+  const allItems = (_activeTask.items || []);
+  const autoResolved = allItems.filter(item => item.status === "system_cleared" || item.status === "operations_filled").length;
+  const items = allItems.filter(item => !["system_cleared", "operations_filled"].includes(item.status)).slice().sort((a, b) => {
+    const aPending = a.status === "pending" ? 0 : 1;
+    const bPending = b.status === "pending" ? 0 : 1;
+    return aPending - bPending || a.sort_index - b.sort_index;
+  });
+  const cards = items.map(renderCheckCard).join("");
+  const autoResolvedCopy = _activeTask.type === "clearing"
+    ? `${fmt(autoResolved)} locations already show stock in BINLOC and are marked as Operations filled.`
+    : `${fmt(autoResolved)} locations were cleared by live BINLOC and are hidden from the checking queue. They remain in the report tab.`;
+  el.innerHTML = taskControlsHtml(_activeTask, _activeSummary || summarizeClientTask(_activeTask)) +
+    (autoResolved ? `<div class="empty-system-banner">${autoResolvedCopy}</div>` : "") +
+    `<div class="empty-check-list">${cards || emptyState("No pending locations remain in this task.")}</div>`;
+}
+
+function renderCheckCard(item) {
+  const pending = item.status === "pending";
+  const live = item.live || {};
+  const isClearingTask = _activeTask?.type === "clearing";
+  const actions = isClearingTask
+    ? [
+        ["cleared", "Cleared"],
+        ["skipped", "Skip"],
+      ]
+    : [
+        ["empty", "Empty"],
+        ["not_empty", "Not empty"],
+      ];
+  const photos = (item.photos || []).map((photo) =>
+    `<a class="empty-photo" href="${escAttr(photo.url)}" target="_blank" rel="noreferrer"><img src="${escAttr(photo.url)}" alt="Photo for ${escAttr(item.location)}" /></a>`
+  ).join("");
+  return `
+    <div class="empty-check-card empty-check-card--${escAttr(statusTone(item.status))}" data-location="${escAttr(item.location)}">
+      <div class="empty-check-card__top">
+        <div>
+          <div class="empty-location">${escHtml(item.location)}</div>
+          <div class="empty-last-transaction">${escHtml(formatLastTransaction(item.last_transaction))}</div>
+          <div class="empty-muted">${escHtml(item.operating_area || "-")} | ${escHtml(item.bin_size || "-")} | ${escHtml(item.bin_type || "-")} | level ${escHtml(item.level || "-")}</div>
+        </div>
+        ${chipStatus(item.status)}
+      </div>
+      <div class="empty-facts">
+        <span>Live qty ${fmt(live.current_qty ?? item.current_qty_at_create)}</span>
+        <span>Live SKU ${escHtml(live.item_sku || item.item_sku || "-")}</span>
+        <span>${escHtml(isClearingTask ? (live.live_empty === false ? "Operations have filled the location" : "Still showing as empty") : (item.source_reason || "Awaiting audit"))}</span>
+      </div>
+      ${item.system_cleared_reason ? `<div class="empty-system-note">${escHtml(item.system_cleared_reason)}</div>` : ""}
+      ${item.note ? `<div class="empty-note">${escHtml(item.note)}</div>` : ""}
+      ${photos ? `<div class="empty-photo-row">${photos}</div>` : ""}
+      ${pending ? `
+        <div class="empty-card-inputs">
+          <textarea class="fi empty-note-input" placeholder="Optional note"></textarea>
+          <input class="fi empty-photo-input" type="file" accept="image/*" capture="environment" />
+        </div>
+        <div class="empty-card-actions empty-card-actions--two">
+          ${actions.map(([action, label]) => `<button class="btn btn--sm ${action === "empty" || action === "cleared" ? "btn--primary" : ""}" data-check-action="${escAttr(action)}">${escHtml(label)}</button>`).join("")}
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+async function handleTaskAction(action) {
+  if (!_activeTask) return;
+  const id = encodeURIComponent(_activeTask.id);
+
+  if (action === "delete") {
+    if (!window.confirm("Delete this task and its saved photos?")) return;
+    try {
+      await apiJson(`/api/empty-bin/tasks/${id}`, { method: "DELETE" });
+      _activeTask = null;
+      _activeSummary = null;
+      renderTask();
+      renderReport();
+      await loadTasks();
+      switchTab("live");
+      window.RepoApp?.toast?.("Task deleted.", "success");
+    } catch (err) {
+      window.RepoApp?.toast?.(err.message, "error");
+    }
+    return;
+  }
+
+  const endpoint = {
+    assign: `/api/empty-bin/tasks/${id}/assign`,
+    drop: `/api/empty-bin/tasks/${id}/drop`,
+    stop: `/api/empty-bin/tasks/${id}/stop`,
+    complete: `/api/empty-bin/tasks/${id}/complete`,
+  }[action];
+  if (!endpoint) return;
+  try {
+    const data = await apiJson(endpoint, { method: "POST", body: "{}" });
+    await loadTasks();
+    if (action === "complete" && data.full_clearing_task?.id) {
+      storeBootstrapTask(data.full_clearing_task.id, data.full_clearing_task, data.clearing_task);
+      window.location.href = `/empty-bins/tasks/${encodeURIComponent(data.full_clearing_task.id)}`;
+      return;
+    }
+    if (action === "complete" || action === "stop") {
+      _activeTask = null;
+      _activeSummary = null;
+      renderTask();
+      switchTab("live");
+      window.RepoApp?.toast?.(action === "stop" ? "Task stopped." : "Task completed.", "success");
+      return;
+    }
+    await loadTask(_activeTask.id, { silent: true });
+  } catch (err) {
+    window.RepoApp?.toast?.(err.message, "error");
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   if (inpDate() && !inpDate().value) inpDate().value = dateOffsetYmd(-1);
   setChip("eChipClient", selClient().options[selClient().selectedIndex]?.text || selClient().value);
@@ -709,8 +1059,30 @@ document.addEventListener("DOMContentLoaded", () => {
     if (btn) switchTab(btn.dataset.tab);
   });
   document.addEventListener("click", (event) => {
-    const taskCard = event.target.closest("[data-empty-task-id]");
-    if (taskCard) {
+    const openTaskButton = event.target.closest("[data-empty-task-open]");
+    if (openTaskButton) {
+      const taskId = openTaskButton.dataset.emptyTaskOpen;
+      if (taskId) window.location.href = `/empty-bins/tasks/${encodeURIComponent(taskId)}`;
+      return;
+    }
+    const stopTaskButton = event.target.closest("[data-empty-task-stop]");
+    if (stopTaskButton) {
+      const taskId = stopTaskButton.dataset.emptyTaskStop;
+      const selectedTask = _tasks.find((task) => task.id === taskId);
+      if (selectedTask) {
+        _activeTask = selectedTask;
+        handleTaskAction("stop");
+      }
+      return;
+    }
+    const deleteTaskButton = event.target.closest("[data-empty-task-delete]");
+    if (deleteTaskButton) {
+      const taskId = deleteTaskButton.dataset.emptyTaskDelete;
+      const selectedTask = _tasks.find((task) => task.id === taskId);
+      if (selectedTask) {
+        _activeTask = selectedTask;
+        handleTaskAction("delete");
+      }
       return;
     }
     const taskAction = event.target.closest("[data-task-action]");

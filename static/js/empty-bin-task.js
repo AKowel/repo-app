@@ -109,19 +109,19 @@ function statusLabel(status) {
     pending: "Pending",
     checked_empty: "Empty",
     checked_not_empty: "Not empty",
-    empty_pallet: "Empty pallet",
-    move_required: "Needs move",
+    cleared: "Cleared",
     moved: "Moved",
     skipped: "Skipped",
     cannot_complete: "Cannot complete",
     system_cleared: "System cleared",
+    operations_filled: "Operations filled",
   };
   return labels[status] || status || "Pending";
 }
 
 function statusTone(status) {
   if (status === "pending") return "pending";
-  if (status === "checked_empty" || status === "empty_pallet" || status === "moved") return "good";
+  if (status === "checked_empty" || status === "cleared" || status === "moved" || status === "operations_filled") return "good";
   if (status === "checked_not_empty" || status === "cannot_complete") return "bad";
   if (status === "system_cleared") return "system";
   return "warn";
@@ -133,14 +133,25 @@ function actionToStatus(action) {
     checked_empty: "checked_empty",
     not_empty: "checked_not_empty",
     checked_not_empty: "checked_not_empty",
-    empty_pallet: "empty_pallet",
-    needs_move: "move_required",
-    move_required: "move_required",
+    cleared: "cleared",
     moved: "moved",
     skipped: "skipped",
     cannot_complete: "cannot_complete",
   };
   return map[String(action || "").trim()] || "pending";
+}
+
+function firstTextValue(...values) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function transactionField(tx, ...keys) {
+  if (!tx) return "";
+  return firstTextValue(...keys.map((key) => tx?.[key]));
 }
 
 function formatLastTransaction(tx) {
@@ -177,7 +188,7 @@ async function apiJson(url, options = {}) {
 
 function visibleItems(task) {
   return (task?.items || [])
-    .filter((item) => item.status !== "system_cleared")
+    .filter((item) => !["system_cleared", "operations_filled"].includes(item.status))
     .slice()
     .sort((a, b) => Number(a.sort_index || 0) - Number(b.sort_index || 0));
 }
@@ -209,9 +220,10 @@ function nextPendingIndex(items, fromIndex) {
 function computeSummary(task, summary = null) {
   const items = Array.isArray(task?.items) ? task.items : [];
   return {
-    checked_count: items.filter((item) => item.status && item.status !== "pending" && item.status !== "system_cleared").length,
+    checked_count: items.filter((item) => item.status && !["pending", "system_cleared", "operations_filled"].includes(item.status)).length,
     pending_count: items.filter((item) => item.status === "pending").length,
     system_cleared_count: items.filter((item) => item.status === "system_cleared").length,
+    operations_filled_count: items.filter((item) => item.status === "operations_filled").length,
     photo_count: items.reduce((sum, item) => sum + ((item.photos || []).length), 0),
     ...(summary && typeof summary === "object" ? summary : {}),
   };
@@ -351,17 +363,19 @@ function setHeader() {
   const total = auditItems.length;
   const checked = checkedCount(auditItems);
   const pending = pendingCount(auditItems);
+  const autoResolved = Number(auditSummary?.system_cleared_count || 0) + Number(auditSummary?.operations_filled_count || 0);
+  const typeLabel = auditTask?.type === "clearing" ? "Clearing task" : "Audit task";
   $("auditTitle").textContent = auditTask?.title || "Empty bin audit";
   $("auditStatusChip").textContent = auditTask?.assignee
-    ? `Assigned: ${auditTask.assignee.name || auditTask.assignee.email || "me"}`
-    : "Unassigned";
+    ? `${typeLabel} | ${auditTask.assignee.name || auditTask.assignee.email || "me"}`
+    : `${typeLabel} | Unassigned`;
   $("auditProgressChip").textContent = `${checked}/${total || 0} checked`;
-  $("auditProgressText").textContent = `${pending} pending, ${checked} checked, ${auditSummary?.system_cleared_count || 0} cleared by live BINLOC`;
+  $("auditProgressText").textContent = `${pending} pending, ${checked} checked, ${autoResolved} auto resolved`;
   $("auditProgressBar").style.width = total ? `${Math.round((checked / total) * 100)}%` : "0%";
 }
 
-function renderFact(label, value) {
-  return `<div class="audit-fact"><span>${escHtml(label)}</span><b>${escHtml(value || "-")}</b></div>`;
+function renderFact(label, value, tone = "") {
+  return `<div class="audit-fact ${tone ? `audit-fact--${escAttr(tone)}` : ""}"><span>${escHtml(label)}</span><b>${escHtml(value || "-")}</b></div>`;
 }
 
 function renderPhotos(item) {
@@ -628,13 +642,18 @@ function renderSyncPanel() {
 }
 
 function renderComplete() {
+  const isClearingTask = auditTask?.type === "clearing";
+  const primaryLabel = isClearingTask ? "Finish clearing task" : "Finish audit";
+  const helpText = isClearingTask
+    ? "This will close the clearing task and return you to the task manager."
+    : "This will close the audit and automatically create a clearing task for the confirmed empty locations.";
   $("auditMain").innerHTML = `
     <section class="audit-empty">
-      <h2>All checks are complete</h2>
+      <h2>${escHtml(primaryLabel)}</h2>
       <p>${fmt(auditSummary?.checked_count || checkedCount(auditItems))} locations have been checked.</p>
+      <div class="audit-empty__note">${escHtml(helpText)}</div>
       <div class="audit-complete-actions">
-        <button class="btn btn--primary" data-task-action="complete">Complete task</button>
-        <button class="btn" data-task-action="followup">Create move task</button>
+        <button class="btn btn--primary" data-task-action="complete">${escHtml(primaryLabel)}</button>
         <a class="btn" href="/empty-bins">Back to task list</a>
       </div>
     </section>
@@ -691,7 +710,7 @@ function renderAuditControls({ pending, compactLayout, actionsMarkup }) {
     <section class="audit-controls ${compactLayout ? "audit-controls--sticky" : ""}">
       <nav class="audit-nav">
         <button class="btn" data-nav-action="prev">Previous</button>
-        <button class="btn" data-nav-action="next-pending">Next pending</button>
+        <button class="btn" ${compactLayout ? "data-queue-toggle" : 'data-nav-action="next-pending"'}>${compactLayout ? (queueExpanded ? "Hide queue" : "Queue") : "Next pending"}</button>
         <button class="btn" data-nav-action="next">Next</button>
       </nav>
       ${pending ? `<div class="audit-actions">${actionsMarkup}</div>` : ""}
@@ -714,23 +733,40 @@ function renderCurrent() {
   const compactLayout = isCompactAuditLayout();
   const live = item.live || {};
   const positionText = `Location ${currentIndex + 1} of ${auditItems.length}`;
-  const actions = auditTask?.type === "move_pallets"
+  const isClearingTask = auditTask?.type === "clearing";
+  const actions = isClearingTask
     ? [
-        ["moved", "Moved"],
-        ["cannot_complete", "Cannot do"],
+        ["cleared", "Cleared"],
         ["skipped", "Skip"],
       ]
     : [
         ["empty", "Empty"],
         ["not_empty", "Not empty"],
-        ["empty_pallet", "Empty pallet"],
-        ["needs_move", "Needs move"],
       ];
   const photoReady = preparedPhoto?.location === item.location && preparedPhoto.dataUrl;
   const draftNote = noteDraftFor(item.location);
   const photoStatusText = photoReady && preparedPhoto.timestamp
     ? `Photo ready | ${preparedPhoto.timestamp}`
     : "No photo attached";
+  const liveQty = fmt(live.current_qty ?? item.current_qty_at_create);
+  const liveSku = firstTextValue(live.item_sku, item.item_sku, item.last_transaction?.item, item.last_transaction?.Last_Item) || "-";
+  const txItem = transactionField(item.last_transaction, "item", "Last_Item") || "-";
+  const txReason = transactionField(item.last_transaction, "reason", "Last_Reason") || "-";
+  const txUser = transactionField(item.last_transaction, "user", "Last_User", "picker") || "-";
+  const txDate = transactionField(item.last_transaction, "date_time", "Last_DateTime", "transaction_date", "snapshot_date") || "-";
+  const decisionCopy = isClearingTask
+    ? "Confirm when the location has been cleared for follow-up."
+    : "Answer the one thing that matters here: is the location still empty right now?";
+  const liveCallout = isClearingTask
+    ? (live.live_empty === false
+        ? "BINLOC now shows stock in this location. It will be marked as Operations filled."
+        : "BINLOC still shows this location as empty.")
+    : (live.live_empty === false
+        ? "Live BINLOC already shows stock in this location."
+        : "Live BINLOC still shows this location as empty.");
+  const sourceCallout = isClearingTask
+    ? "Created from the finished empty-bin audit."
+    : (item.source_reason || "Queued from the daily empty-bin report.");
   const localSyncNote = item.local_pending_sync
     ? (
       item.local_sync_error
@@ -739,12 +775,12 @@ function renderCurrent() {
     )
     : "";
   const actionButtons = actions
-    .map(([action, label]) => `<button class="audit-action ${action === "empty" || action === "moved" ? "audit-action--primary" : ""}" data-check-action="${escAttr(action)}">${escHtml(label)}</button>`)
+    .map(([action, label]) => `<button class="audit-action ${action === "empty" || action === "cleared" ? "audit-action--primary" : ""}" data-check-action="${escAttr(action)}">${escHtml(label)}</button>`)
     .join("");
 
   $("auditMain").innerHTML = `
     <section class="audit-card ${compactLayout ? "audit-card--compact" : ""}" data-current-location="${escAttr(item.location)}">
-      <div class="audit-location-head">
+      <div class="audit-card__hero">
         <div>
           <div class="audit-location">${escHtml(item.location)}</div>
           <div class="audit-subline">${escHtml(positionText)} | ${escHtml(item.operating_area || "-")} | ${escHtml(item.bin_size || "-")} | ${escHtml(item.bin_type || "-")} | level ${escHtml(item.level || "-")}</div>
@@ -752,13 +788,28 @@ function renderCurrent() {
         <span class="audit-status audit-status--${escAttr(statusTone(item.status))}">${escHtml(statusLabel(item.status))}</span>
       </div>
 
-      <div class="audit-last">${escHtml(formatLastTransaction(item.last_transaction))}</div>
+      <div class="audit-callout ${live.live_empty === false ? "audit-callout--warn" : "audit-callout--ok"}">
+        <div class="audit-callout__title">${escHtml(decisionCopy)}</div>
+        <div class="audit-callout__meta">${escHtml(liveCallout)}</div>
+      </div>
+
+      <div class="audit-facts audit-facts--summary">
+        ${renderFact("Live qty", liveQty, "strong")}
+        ${renderFact("Live SKU", liveSku)}
+        ${renderFact("Last item", txItem)}
+        ${renderFact("Last user", txUser)}
+      </div>
+
+      <div class="audit-inline-notes">
+        <div class="audit-last">${escHtml(`Last reason | ${txReason}`)}</div>
+        <div class="audit-last">${escHtml(`Last time | ${txDate}`)}</div>
+      </div>
 
       <div class="audit-facts">
-        ${renderFact("Live qty", fmt(live.current_qty ?? item.current_qty_at_create))}
-        ${renderFact("Live SKU", live.item_sku || "-")}
         ${renderFact("Created qty", fmt(item.current_qty_at_create))}
-        ${renderFact("Source", item.source_reason || "-")}
+        ${renderFact("Source", sourceCallout)}
+        ${renderFact("Report date", item.report_date || "-")}
+        ${renderFact("Task type", isClearingTask ? "Clearing" : "Audit")}
       </div>
 
       ${item.system_cleared_reason ? `<div class="audit-last">${escHtml(item.system_cleared_reason)}</div>` : ""}
@@ -779,8 +830,7 @@ function renderCurrent() {
       <section class="audit-empty">
         <p>No pending locations remain.</p>
         <div class="audit-complete-actions">
-          <button class="btn btn--primary" data-task-action="complete">Complete task</button>
-          <button class="btn" data-task-action="followup">Create move task</button>
+          <button class="btn btn--primary" data-task-action="complete">${escHtml(isClearingTask ? "Finish clearing task" : "Finish audit")}</button>
         </div>
       </section>
     ` : ""}
@@ -981,26 +1031,30 @@ function storeBootstrapTask(taskId, task, summary) {
 
 async function handleTaskAction(action) {
   if (!action) return;
-  if (!navigator.onLine && ["complete", "followup", "assign", "drop"].includes(action)) {
+  if (!navigator.onLine && ["complete", "assign", "drop", "stop"].includes(action)) {
     window.RepoApp?.toast?.("Reconnect before changing task assignment or completion.", "error");
     return;
   }
 
   const endpoint = {
     complete: `/api/empty-bin/tasks/${encodeURIComponent(TASK_ID)}/complete`,
-    followup: `/api/empty-bin/tasks/${encodeURIComponent(TASK_ID)}/create-followup`,
     assign: `/api/empty-bin/tasks/${encodeURIComponent(TASK_ID)}/assign`,
     drop: `/api/empty-bin/tasks/${encodeURIComponent(TASK_ID)}/drop`,
+    stop: `/api/empty-bin/tasks/${encodeURIComponent(TASK_ID)}/stop`,
   }[action];
   if (!endpoint) return;
   try {
     const data = await apiJson(endpoint, { method: "POST", body: "{}" });
-    if (action === "followup" && data.full_task?.id) {
-      storeBootstrapTask(data.full_task.id, data.full_task, computeSummary(data.full_task, data.task));
-      window.location.href = `/empty-bins/tasks/${encodeURIComponent(data.full_task.id)}`;
+    if (action === "complete") {
+      if (data.full_clearing_task?.id) {
+        storeBootstrapTask(data.full_clearing_task.id, data.full_clearing_task, computeSummary(data.full_clearing_task, data.clearing_task));
+        window.location.href = `/empty-bins/tasks/${encodeURIComponent(data.full_clearing_task.id)}`;
+        return;
+      }
+      window.location.href = "/empty-bins";
       return;
     }
-    if (action === "complete") {
+    if (action === "stop") {
       window.location.href = "/empty-bins";
       return;
     }

@@ -609,6 +609,7 @@ function summarizeEmptyBinTask(task) {
   const items = task?.items || [];
   const pending = items.filter(item => item.status === "pending").length;
   const systemCleared = items.filter(item => item.status === "system_cleared").length;
+  const operationsFilled = items.filter(item => item.status === "operations_filled").length;
   const checked = items.filter(item => item.status && item.status !== "pending" && item.status !== "system_cleared").length;
   const photos = items.reduce((sum, item) => sum + ((item.photos || []).length), 0);
   return {
@@ -626,8 +627,47 @@ function summarizeEmptyBinTask(task) {
     pending_count: pending,
     checked_count: checked,
     system_cleared_count: systemCleared,
+    operations_filled_count: operationsFilled,
     photo_count: photos,
   };
+}
+
+function buildClearingTaskItemsFromAudit(task) {
+  return (task?.items || [])
+    .filter(item => item.status === "checked_empty")
+    .map((item) => ({
+      location: item.location,
+      aisle_prefix: item.aisle_prefix,
+      bay: item.bay,
+      level: item.level,
+      level_num: item.level_num,
+      operating_area: item.operating_area,
+      bin_size: item.bin_size,
+      bin_type: item.bin_type,
+      client_code: item.client_code,
+      item_sku: item.item_sku,
+      item_description: item.item_description,
+      report_date: item.report_date,
+      source_reason: "confirmed_empty_audit",
+      current_qty: item.live?.current_qty ?? item.current_qty_at_create,
+      available_qty: item.live?.available_qty ?? item.available_qty_at_create,
+      qty_under_query: item.qty_under_query,
+      goods_in_pending: item.goods_in_pending,
+      pending_from: item.pending_from,
+      pending_to: item.pending_to,
+      max_bin_qty: item.max_bin_qty,
+      last_move_out_date: item.last_move_out_date,
+      last_move_in_date: item.last_move_in_date,
+      last_transaction: item.last_transaction || null,
+      audit_source_status: item.status,
+    }));
+}
+
+function findChildTask(sourceTaskId, type) {
+  return emptyBinTaskStore.listTasks().find((task) =>
+    String(task?.source_task_id || "") === String(sourceTaskId || "") &&
+    String(task?.type || "") === String(type || "")
+  ) || null;
 }
 
 async function loadEmptyBinLiveIndex(client) {
@@ -721,7 +761,21 @@ async function refreshEmptyBinTask(taskId) {
       const current = live.liveByLocation.get(location) || null;
       item.live = current;
       item.last_transaction = dayContext?.last_transactions?.get(location) || fallbackTransactions.get(location) || item.last_transaction || null;
-      if (item.status === "pending" && (!current || !current.live_empty)) {
+      if (existingTask.type === "clearing") {
+        if (item.status === "pending" && current && !current.live_empty) {
+          item.status = "operations_filled";
+          item.result = "operations_filled";
+          item.system_cleared_at = new Date().toISOString();
+          item.system_cleared_reason = "Operations have filled the location in BINLOC.";
+          item.history = item.history || [];
+          item.history.push({
+            at: item.system_cleared_at,
+            action: "operations_filled",
+            reason: item.system_cleared_reason,
+            live: current,
+          });
+        }
+      } else if (item.status === "pending" && (!current || !current.live_empty)) {
         item.status = "system_cleared";
         item.result = "system_cleared";
         item.system_cleared_at = new Date().toISOString();
@@ -4213,10 +4267,49 @@ app.post("/api/empty-bin/tasks/:taskId/drop", requireAdminApi, (req, res) => {
   return res.json({ ok: true, task, summary: summarizeEmptyBinTask(task) });
 });
 
+app.post("/api/empty-bin/tasks/:taskId/stop", requireAdminApi, (req, res) => {
+  const task = emptyBinTaskStore.stopTask(req.params.taskId, req.currentUser);
+  if (!task) return res.status(404).json({ ok: false, error: "Task not found." });
+  return res.json({ ok: true, task, summary: summarizeEmptyBinTask(task) });
+});
+
+app.delete("/api/empty-bin/tasks/:taskId", requireAdminApi, (req, res) => {
+  const task = emptyBinTaskStore.deleteTask(req.params.taskId, req.currentUser);
+  if (!task) return res.status(404).json({ ok: false, error: "Task not found." });
+  return res.json({ ok: true, task });
+});
+
 app.post("/api/empty-bin/tasks/:taskId/complete", requireAdminApi, (req, res) => {
   const task = emptyBinTaskStore.completeTask(req.params.taskId, req.currentUser);
   if (!task) return res.status(404).json({ ok: false, error: "Task not found." });
-  return res.json({ ok: true, task, summary: summarizeEmptyBinTask(task) });
+  let clearingTask = null;
+  if (task.type === "empty_check") {
+    const existingClearing = findChildTask(task.id, "clearing");
+    if (existingClearing) {
+      clearingTask = existingClearing;
+    } else {
+      const items = buildClearingTaskItemsFromAudit(task);
+      if (items.length) {
+        clearingTask = emptyBinTaskStore.createTask({
+          client: task.client,
+          type: "clearing",
+          title: `Clearing task for ${task.title}`,
+          createdBy: req.currentUser,
+          sourceTaskId: task.id,
+          filters: { source_task_id: task.id, report_date: task.filters?.report_date || "" },
+          snapshotMeta: task.snapshot_meta || {},
+          items,
+        });
+      }
+    }
+  }
+  return res.json({
+    ok: true,
+    task,
+    summary: summarizeEmptyBinTask(task),
+    clearing_task: clearingTask ? summarizeEmptyBinTask(clearingTask) : null,
+    full_clearing_task: clearingTask || null,
+  });
 });
 
 app.post("/api/empty-bin/tasks/:taskId/create-followup", requireAdminApi, async (req, res) => {
@@ -4224,17 +4317,19 @@ app.post("/api/empty-bin/tasks/:taskId/create-followup", requireAdminApi, async 
     const refreshed = await refreshEmptyBinTask(req.params.taskId);
     if (!refreshed) return res.status(404).json({ ok: false, error: "Task not found." });
     const task = refreshed.task;
-    const items = (task.items || [])
-      .filter(item => ["checked_empty", "empty_pallet", "move_required"].includes(item.status))
-      .filter(item => item.live?.live_empty !== false)
-      .map(item => item.live || item);
+    const existingClearing = findChildTask(task.id, "clearing");
+    if (existingClearing) {
+      return res.json({ ok: true, task: summarizeEmptyBinTask(existingClearing), full_task: existingClearing });
+    }
+    const items = buildClearingTaskItemsFromAudit(task)
+      .filter(item => item.current_qty <= 0 || !item.item_sku);
     if (!items.length) {
-      return res.status(400).json({ ok: false, error: "No checked empty locations still need a follow-up move task." });
+      return res.status(400).json({ ok: false, error: "No confirmed empty locations are ready for a clearing task." });
     }
     const followup = emptyBinTaskStore.createTask({
       client: task.client,
-      type: "move_pallets",
-      title: req.body?.title || `Bring pallets for ${task.title}`,
+      type: "clearing",
+      title: req.body?.title || `Clearing task for ${task.title}`,
       createdBy: req.currentUser,
       sourceTaskId: task.id,
       filters: { source_task_id: task.id },
@@ -4254,6 +4349,7 @@ app.post("/api/empty-bin/tasks/:taskId/locations/:location/check", requireAdminA
     checked_empty: "checked_empty",
     not_empty: "checked_not_empty",
     checked_not_empty: "checked_not_empty",
+    cleared: "cleared",
     empty_pallet: "empty_pallet",
     needs_move: "move_required",
     move_required: "move_required",

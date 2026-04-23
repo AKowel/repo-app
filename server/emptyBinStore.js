@@ -76,6 +76,11 @@ class EmptyBinTaskStore {
     return state.tasks.find(task => task.id === taskId) || null;
   }
 
+  findTask(predicate) {
+    const state = this.readState();
+    return state.tasks.find(predicate) || null;
+  }
+
   updateTask(taskId, updater) {
     const state = this.readState();
     const index = state.tasks.findIndex(task => task.id === taskId);
@@ -95,7 +100,13 @@ class EmptyBinTaskStore {
       id: makeId("ebt"),
       client: String(client || "").trim().toUpperCase(),
       type,
-      title: title || (type === "move_pallets" ? "Bring pallets to checked empty locations" : "Daily empty bin check"),
+      title: title || (
+        type === "clearing"
+          ? "Clearing task for confirmed empty locations"
+          : type === "move_pallets"
+            ? "Bring pallets to checked empty locations"
+            : "Daily empty bin check"
+      ),
       status: "available",
       assignee: null,
       created_by: userSnapshot(createdBy),
@@ -159,9 +170,19 @@ class EmptyBinTaskStore {
   dropTask(taskId, user) {
     return this.updateTask(taskId, (task) => {
       task.assignee = null;
-      if (task.status !== "completed") task.status = "available";
+      if (!["completed", "deleted"].includes(task.status)) task.status = "available";
       task.history = task.history || [];
       task.history.push({ at: nowIso(), action: "dropped", user: userSnapshot(user) });
+      return task;
+    });
+  }
+
+  stopTask(taskId, user) {
+    return this.updateTask(taskId, (task) => {
+      task.assignee = null;
+      if (!["completed", "deleted"].includes(task.status)) task.status = "stopped";
+      task.history = task.history || [];
+      task.history.push({ at: nowIso(), action: "stopped", user: userSnapshot(user) });
       return task;
     });
   }
@@ -173,6 +194,29 @@ class EmptyBinTaskStore {
       task.completed_by = userSnapshot(user);
       return task;
     });
+  }
+
+  deleteTask(taskId, user) {
+    const state = this.readState();
+    const index = state.tasks.findIndex(task => task.id === taskId);
+    if (index < 0) return null;
+    const [task] = state.tasks.splice(index, 1);
+    for (const item of (task.items || [])) {
+      for (const photo of (item.photos || [])) {
+        const fileName = path.basename(String(photo?.file_name || ""));
+        if (!fileName) continue;
+        const filePath = path.join(this.imagesDir, fileName);
+        try {
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        } catch (_) {}
+      }
+    }
+    this.writeState(state);
+    return {
+      ...task,
+      deleted_at: nowIso(),
+      deleted_by: userSnapshot(user),
+    };
   }
 
   updateLocation(taskId, location, { status, result, note, user }) {
