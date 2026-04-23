@@ -210,6 +210,65 @@ function reportDateToCompact(value) {
   return normalizeReportDate(value).replace(/-/g, "");
 }
 
+function buildEmptyBinSyncRequestedBy(user) {
+  if (!user || typeof user !== "object") return "repo-app:admin";
+  const label = String(user.email || user.name || user.id || "admin").trim();
+  return `repo-app:${label || "admin"}`;
+}
+
+async function buildEmptyBinReportSyncState(reportDate) {
+  const client = EMPTY_BIN_CLIENT_CODE;
+  const selectedDate = normalizeReportDate(reportDate);
+  const [snapshotMeta, latestJob] = await Promise.all([
+    service.getEmptyBinsReportSnapshotMeta(client, selectedDate),
+    service.findLatestEmptyBinsReportJob(client, selectedDate, { limit: 60 }),
+  ]);
+
+  let status = "idle";
+  if (snapshotMeta) {
+    status = "ready";
+  } else if (latestJob?.status) {
+    status = latestJob.status;
+  }
+
+  return {
+    client,
+    report_date: selectedDate,
+    status,
+    snapshot: snapshotMeta
+      ? {
+          available: true,
+          row_count: Number(snapshotMeta.row_count || 0),
+          source: snapshotMeta.source || "",
+          uploaded_at: snapshotMeta.uploaded_at || "",
+          source_synced_at: snapshotMeta.source_synced_at || "",
+          record_id: snapshotMeta.record_id || "",
+        }
+      : {
+          available: false,
+          row_count: 0,
+          source: "",
+          uploaded_at: "",
+          source_synced_at: "",
+          record_id: "",
+        },
+    job: latestJob ? {
+      id: latestJob.id,
+      status: latestJob.status,
+      requested_by: latestJob.requested_by,
+      requested_at: latestJob.requested_at,
+      claimed_by: latestJob.claimed_by,
+      claimed_at: latestJob.claimed_at,
+      completed_at: latestJob.completed_at,
+      failed_at: latestJob.failed_at,
+      attempt_count: latestJob.attempt_count,
+      error_text: latestJob.error_text,
+      payload: latestJob.payload,
+      result: latestJob.result,
+    } : null,
+  };
+}
+
 function normalizeCompactDate(value) {
   const text = String(value || "").trim();
   if (!text || text === "0" || text === "00000000") return "";
@@ -3808,6 +3867,40 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
       },
       period_breakdown: periodBreakdown,
       sku_period_matrix: skuPeriodMatrix,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.get("/api/empty-bin/report-sync-status", requireAdminApi, async (req, res) => {
+  const reportDate = normalizeReportDate(req.query.date || req.query.report_date);
+  try {
+    const sync = await buildEmptyBinReportSyncState(reportDate);
+    return res.json({ ok: true, sync });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.post("/api/empty-bin/report-sync-request", requireAdminApi, async (req, res) => {
+  const reportDate = normalizeReportDate(req.body?.date || req.body?.report_date || req.query?.date || req.query?.report_date);
+  const force = String(req.body?.force || "").trim().toLowerCase() === "true";
+  const client = EMPTY_BIN_CLIENT_CODE;
+
+  try {
+    const existingSnapshot = await service.getEmptyBinsReportSnapshotMeta(client, reportDate);
+    let requestState = { created: false, job: null };
+
+    if (!existingSnapshot || force) {
+      requestState = await service.ensureEmptyBinsReportJob(client, reportDate, buildEmptyBinSyncRequestedBy(req.currentUser));
+    }
+
+    const sync = await buildEmptyBinReportSyncState(reportDate);
+    return res.json({
+      ok: true,
+      created: Boolean(requestState.created),
+      sync,
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err.message || err) });

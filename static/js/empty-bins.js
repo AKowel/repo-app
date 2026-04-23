@@ -5,6 +5,9 @@ let _tasks = [];
 let _activeTask = null;
 let _activeSummary = null;
 let _pollTimer = null;
+let _reportSync = null;
+let _reportSyncTimer = null;
+let _reportSyncReadyToast = false;
 
 const selClient = () => document.getElementById("eSelClient");
 const selArea = () => document.getElementById("eSelArea");
@@ -15,6 +18,16 @@ const selLimit = () => document.getElementById("eSelLimit");
 
 function fmt(n) {
   return Number(n ?? 0).toLocaleString();
+}
+
+function formatDateTimeText(value) {
+  const text = String(value || "").trim();
+  if (!text) return "-";
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleString();
+  }
+  return text;
 }
 
 function escHtml(value) {
@@ -104,6 +117,12 @@ function buildLiveQuery() {
   return params;
 }
 
+function buildReportSyncQuery() {
+  const params = new URLSearchParams();
+  params.set("date", selectedReportDate());
+  return params;
+}
+
 async function apiJson(url, options = {}) {
   const resp = await fetch(url, {
     ...options,
@@ -145,6 +164,147 @@ async function loadLive() {
   } catch (err) {
     document.getElementById("eTab-live").innerHTML = errorHtml(err.message);
     setChip("eChipStatus", "Error");
+  }
+}
+
+function stopReportSyncPolling() {
+  if (_reportSyncTimer) clearInterval(_reportSyncTimer);
+  _reportSyncTimer = null;
+}
+
+function shouldPollReportSync(sync) {
+  const status = String(sync?.status || "").trim().toLowerCase();
+  return !Boolean(sync?.snapshot?.available) && (status === "queued" || status === "running");
+}
+
+function startReportSyncPolling() {
+  stopReportSyncPolling();
+  if (!shouldPollReportSync(_reportSync)) return;
+  _reportSyncTimer = setInterval(() => {
+    loadReportSyncStatus({ silent: true }).catch(() => {});
+  }, 4000);
+}
+
+function renderReportSyncStatus() {
+  const el = document.getElementById("eReportSyncStatus");
+  if (!el) return;
+
+  if (!_reportSync) {
+    el.innerHTML = `
+      <div class="empty-sync-banner empty-sync-banner--idle">
+        <div class="empty-sync-banner__title">Checking daily report status...</div>
+      </div>
+    `;
+    return;
+  }
+
+  const snapshot = _reportSync.snapshot || {};
+  const job = _reportSync.job || null;
+  const status = String(_reportSync.status || "").trim().toLowerCase();
+
+  if (snapshot.available) {
+    el.innerHTML = `
+      <div class="empty-sync-banner empty-sync-banner--ready">
+        <div class="empty-sync-banner__title">Daily empty-bin report is ready for ${escHtml(_reportSync.report_date || selectedReportDate())}.</div>
+        <div class="empty-sync-banner__meta">
+          ${fmt(snapshot.row_count)} rows &middot; source ${escHtml(snapshot.source || "odbc")} &middot; uploaded ${escHtml(formatDateTimeText(snapshot.uploaded_at))} &middot; synced ${escHtml(formatDateTimeText(snapshot.source_synced_at))}
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  if (status === "queued" || status === "running") {
+    const requested = job?.requested_at ? `Requested ${escHtml(formatDateTimeText(job.requested_at))}` : "Request queued";
+    const claimed = job?.claimed_at ? ` &middot; Started ${escHtml(formatDateTimeText(job.claimed_at))}` : "";
+    el.innerHTML = `
+      <div class="empty-sync-banner empty-sync-banner--pending">
+        <div class="empty-sync-banner__title">Daily empty-bin report is ${escHtml(status)} for ${escHtml(_reportSync.report_date || selectedReportDate())}.</div>
+        <div class="empty-sync-banner__meta">
+          ${requested}${claimed} &middot; Requested by ${escHtml(job?.requested_by || "-")}
+        </div>
+        <div class="empty-sync-banner__note">Repo-app is using live BINLOC plus same-day transaction fallbacks until the daily report snapshot arrives.</div>
+      </div>
+    `;
+    return;
+  }
+
+  if (status === "failed" && job) {
+    el.innerHTML = `
+      <div class="empty-sync-banner empty-sync-banner--failed">
+        <div class="empty-sync-banner__title">The last daily empty-bin report request failed for ${escHtml(_reportSync.report_date || selectedReportDate())}.</div>
+        <div class="empty-sync-banner__meta">
+          Failed ${escHtml(formatDateTimeText(job.failed_at || job.completed_at || job.requested_at))} &middot; Attempt ${fmt(job.attempt_count || 0)}
+        </div>
+        <div class="empty-sync-banner__note">${escHtml(job.error_text || "The local sync agent reported a failure.")}</div>
+      </div>
+    `;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="empty-sync-banner empty-sync-banner--idle">
+      <div class="empty-sync-banner__title">No daily empty-bin report snapshot has been requested for ${escHtml(_reportSync.report_date || selectedReportDate())} yet.</div>
+      <div class="empty-sync-banner__note">Repo-app can still work from live BINLOC and same-day transaction data, but requesting the daily report gives you the exact snapshot from the local sync machine.</div>
+    </div>
+  `;
+}
+
+async function loadReportSyncStatus({ silent = false } = {}) {
+  const previousAvailable = Boolean(_reportSync?.snapshot?.available);
+  const previousStatus = String(_reportSync?.status || "").trim().toLowerCase();
+  try {
+    const data = await apiJson("/api/empty-bin/report-sync-status?" + buildReportSyncQuery().toString());
+    _reportSync = data.sync || null;
+    renderReportSyncStatus();
+    startReportSyncPolling();
+    const nextAvailable = Boolean(_reportSync?.snapshot?.available);
+    const nextStatus = String(_reportSync?.status || "").trim().toLowerCase();
+    if (!previousAvailable && nextAvailable) {
+      await loadLive();
+      if (_reportSyncReadyToast) {
+        window.RepoApp?.toast?.("Daily empty-bin report loaded.", "success");
+        _reportSyncReadyToast = false;
+      }
+    } else if (previousStatus !== nextStatus && nextStatus === "ready") {
+      await loadLive();
+    }
+  } catch (err) {
+    stopReportSyncPolling();
+    document.getElementById("eReportSyncStatus").innerHTML = errorHtml(err.message);
+    if (!silent) {
+      window.RepoApp?.toast?.(err.message, "error");
+    }
+  }
+}
+
+async function requestReportSync(force = false) {
+  setChip("eChipStatus", "Requesting daily report...");
+  try {
+    const data = await apiJson("/api/empty-bin/report-sync-request", {
+      method: "POST",
+      body: JSON.stringify({ report_date: selectedReportDate(), force }),
+    });
+    _reportSync = data.sync || null;
+    renderReportSyncStatus();
+    startReportSyncPolling();
+    if (data.created) {
+      _reportSyncReadyToast = true;
+      window.RepoApp?.toast?.("Daily empty-bin report requested.", "success");
+      setChip("eChipStatus", "Report requested");
+    } else if (_reportSync?.snapshot?.available) {
+      _reportSyncReadyToast = false;
+      window.RepoApp?.toast?.("Daily empty-bin report is already available.", "success");
+      setChip("eChipStatus", "Report ready");
+      await loadLive();
+    } else {
+      _reportSyncReadyToast = true;
+      window.RepoApp?.toast?.(`Daily empty-bin report is already ${_reportSync?.status || "queued"}.`, "info");
+      setChip("eChipStatus", "Using existing request");
+    }
+  } catch (err) {
+    window.RepoApp?.toast?.(err.message, "error");
+    setChip("eChipStatus", "Request failed");
   }
 }
 
@@ -484,21 +644,34 @@ async function submitCheck(card, action) {
 document.addEventListener("DOMContentLoaded", () => {
   if (inpDate() && !inpDate().value) inpDate().value = dateOffsetYmd(-1);
   setChip("eChipClient", selClient().options[selClient().selectedIndex]?.text || selClient().value);
+  renderReportSyncStatus();
+  loadReportSyncStatus().catch(() => {});
   loadLive();
   loadTasks();
 
-  document.getElementById("eBtnLoadLive").addEventListener("click", loadLive);
+  document.getElementById("eBtnLoadLive").addEventListener("click", () => {
+    loadReportSyncStatus().catch(() => {});
+    loadLive();
+  });
+  document.getElementById("eBtnRequestReport").addEventListener("click", () => requestReportSync(false));
   document.getElementById("eBtnLoadTasks").addEventListener("click", loadTasks);
   document.getElementById("eBtnCreateTask").addEventListener("click", createTaskFromFilters);
   selClient().addEventListener("change", () => {
     setChip("eChipClient", selClient().options[selClient().selectedIndex]?.text || selClient().value);
     _activeTask = null;
+    _reportSyncReadyToast = false;
+    loadReportSyncStatus().catch(() => {});
     loadLive();
     loadTasks();
     renderTask();
     renderReport();
   });
-  [inpDate(), selArea(), selBinSize(), selLimit()].forEach((el) => el?.addEventListener("change", loadLive));
+  inpDate()?.addEventListener("change", () => {
+    _reportSyncReadyToast = false;
+    loadReportSyncStatus().catch(() => {});
+    loadLive();
+  });
+  [selArea(), selBinSize(), selLimit()].forEach((el) => el?.addEventListener("change", loadLive));
   inpSearch().addEventListener("keydown", (event) => {
     if (event.key === "Enter") loadLive();
   });

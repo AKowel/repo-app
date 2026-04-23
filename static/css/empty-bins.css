@@ -17,6 +17,51 @@
   scroll-margin-top: 12px;
 }
 
+.empty-sync-status {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+}
+
+.empty-sync-banner {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.empty-sync-banner__title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.empty-sync-banner__meta,
+.empty-sync-banner__note {
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.empty-sync-banner--ready {
+  background: rgba(34, 197, 94, .08);
+  border-color: rgba(34, 197, 94, .24);
+}
+
+.empty-sync-banner--pending {
+  background: rgba(79, 142, 247, .08);
+  border-color: rgba(79, 142, 247, .24);
+}
+
+.empty-sync-banner--failed {
+  background: rgba(239, 68, 68, .08);
+  border-color: rgba(239, 68, 68, .24);
+}
+
+.empty-sync-banner--idle {
+  background: var(--surface);
+}
+
 .empty-task-list {
   display: grid;
   gap: 8px;

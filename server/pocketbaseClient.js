@@ -161,6 +161,22 @@ class PocketBaseClient {
     );
   }
 
+  async createRecord(collectionName, payload) {
+    return this.adminRequest(
+      "POST",
+      `/api/collections/${encodeURIComponent(collectionName)}/records`,
+      { payload }
+    );
+  }
+
+  async updateRecord(collectionName, recordId, payload) {
+    return this.adminRequest(
+      "PATCH",
+      `/api/collections/${encodeURIComponent(collectionName)}/records/${encodeURIComponent(recordId)}`,
+      { payload }
+    );
+  }
+
   async authWithPassword(collectionName, identity, password) {
     return this._request(
       "POST",

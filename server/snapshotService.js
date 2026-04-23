@@ -13,6 +13,7 @@ const COLLECTIONS = {
 const ITEM_CATALOG_SNAPSHOT_COLLECTION = "item_catalog_snapshots";
 const ITEM_CATALOG_IMAGE_COLLECTION = "item_catalog_images";
 const EMPTY_BINS_REPORT_SNAPSHOT_COLLECTION = "empty_bins_report_snapshots";
+const SYNC_JOBS_COLLECTION = "sync_jobs";
 
 const TTL_TODAY_MS = 5 * 60 * 1000;
 const TTL_HISTORIC_MS = 4 * 60 * 60 * 1000;
@@ -283,6 +284,128 @@ class SnapshotService {
       this.cache.set(cacheKey, { loadedAt: Date.now(), rows, meta });
     }
     return { rows, meta, fromCache: false };
+  }
+
+  _normalizeJsonField(value, fallback = {}) {
+    if (Array.isArray(fallback)) {
+      if (Array.isArray(value)) return value;
+    } else if (value && typeof value === "object") {
+      return value;
+    }
+    if (value === null || value === undefined || value === "") return fallback;
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(fallback)) return Array.isArray(parsed) ? parsed : fallback;
+        return parsed && typeof parsed === "object" ? parsed : fallback;
+      } catch {
+        return fallback;
+      }
+    }
+    return fallback;
+  }
+
+  serializeSyncJob(record) {
+    if (!record) return null;
+    return {
+      id: String(record.id || ""),
+      job_type: String(record.job_type || ""),
+      status: String(record.status || "queued"),
+      payload: this._normalizeJsonField(record.payload_json, {}),
+      result: this._normalizeJsonField(record.result_json, {}),
+      requested_by: String(record.requested_by || ""),
+      requested_at: String(record.requested_at || record.created || ""),
+      claimed_by: String(record.claimed_by || ""),
+      claimed_at: String(record.claimed_at || ""),
+      completed_at: String(record.completed_at || ""),
+      failed_at: String(record.failed_at || ""),
+      attempt_count: Number(record.attempt_count || 0),
+      error_text: String(record.error_text || ""),
+    };
+  }
+
+  async getEmptyBinsReportSnapshotMeta(clientCode = "FANDMKET", reportDate) {
+    const targetClient = String(clientCode || "FANDMKET").trim().toUpperCase();
+    const targetDate = String(reportDate || todayYMD()).trim();
+    const response = await this.pb.listRecords(EMPTY_BINS_REPORT_SNAPSHOT_COLLECTION, {
+      filterExpr: `client_code=${pbLiteral(targetClient)} && report_date=${pbLiteral(targetDate)}`,
+      sort: "-uploaded_at",
+      perPage: 1,
+    }).catch(() => ({ items: [] }));
+
+    const record = (response.items || [])[0] || null;
+    if (!record) return null;
+    return {
+      client_code: record.client_code || targetClient,
+      report_date: record.report_date || targetDate,
+      row_count: Number(record.row_count || 0),
+      source: record.source || "",
+      uploaded_at: record.uploaded_at || "",
+      source_synced_at: record.source_synced_at || "",
+      record_id: record.id || "",
+    };
+  }
+
+  async listSyncJobs(jobType, { statuses = [], limit = 30 } = {}) {
+    const typeText = String(jobType || "").trim();
+    const statusList = Array.isArray(statuses)
+      ? statuses.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+
+    const filterParts = [];
+    if (typeText) filterParts.push(`job_type=${pbLiteral(typeText)}`);
+    if (statusList.length === 1) {
+      filterParts.push(`status=${pbLiteral(statusList[0])}`);
+    } else if (statusList.length > 1) {
+      filterParts.push(`(${statusList.map((value) => `status=${pbLiteral(value)}`).join(" || ")})`);
+    }
+
+    const response = await this.pb.listRecords(SYNC_JOBS_COLLECTION, {
+      filterExpr: filterParts.length ? filterParts.join(" && ") : undefined,
+      sort: "-requested_at,-created",
+      perPage: Math.max(1, Math.min(Number(limit) || 30, 100)),
+    }).catch(() => ({ items: [] }));
+
+    return (response.items || []).map((row) => this.serializeSyncJob(row)).filter(Boolean);
+  }
+
+  async findLatestEmptyBinsReportJob(clientCode = "FANDMKET", reportDate, { statuses = [], limit = 50 } = {}) {
+    const targetClient = String(clientCode || "FANDMKET").trim().toUpperCase();
+    const targetDate = String(reportDate || todayYMD()).trim();
+    const rows = await this.listSyncJobs("empty_bins_report_by_date", { statuses, limit });
+    return rows.find((job) => {
+      const payloadClient = String(job?.payload?.client_code || "").trim().toUpperCase();
+      const payloadDate = String(job?.payload?.report_date || "").trim();
+      return payloadClient === targetClient && payloadDate === targetDate;
+    }) || null;
+  }
+
+  async ensureEmptyBinsReportJob(clientCode = "FANDMKET", reportDate, requestedBy = "repo-app") {
+    const targetClient = String(clientCode || "FANDMKET").trim().toUpperCase();
+    const targetDate = String(reportDate || todayYMD()).trim();
+
+    const existing = await this.findLatestEmptyBinsReportJob(targetClient, targetDate, {
+      statuses: ["queued", "running"],
+      limit: 60,
+    });
+    if (existing) return { job: existing, created: false };
+
+    const now = new Date().toISOString();
+    const created = await this.pb.createRecord(SYNC_JOBS_COLLECTION, {
+      job_type: "empty_bins_report_by_date",
+      status: "queued",
+      payload_json: {
+        report_date: targetDate,
+        client_code: targetClient,
+      },
+      result_json: {},
+      requested_by: String(requestedBy || "repo-app"),
+      requested_at: now,
+      attempt_count: 0,
+      error_text: "",
+    });
+
+    return { job: this.serializeSyncJob(created), created: true };
   }
 
   async getSkuDetail(sku, clientCode = "FANDMKET") {
