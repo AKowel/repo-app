@@ -216,6 +216,17 @@ function buildEmptyBinSyncRequestedBy(user) {
   return `repo-app:${label || "admin"}`;
 }
 
+function normalizeCustomQueryName(value, fallback = "custom_query") {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return (text || fallback).slice(0, 120);
+}
+
+function buildCustomQueryRequestedBy(user) {
+  if (!user || typeof user !== "object") return "repo-app:admin";
+  const label = String(user.email || user.name || user.id || "admin").trim();
+  return `repo-app:${label || "admin"}`;
+}
+
 async function buildEmptyBinReportSyncState(reportDate) {
   const client = EMPTY_BIN_CLIENT_CODE;
   const selectedDate = normalizeReportDate(reportDate);
@@ -251,6 +262,67 @@ async function buildEmptyBinReportSyncState(reportDate) {
           uploaded_at: "",
           source_synced_at: "",
           record_id: "",
+        },
+    job: latestJob ? {
+      id: latestJob.id,
+      status: latestJob.status,
+      requested_by: latestJob.requested_by,
+      requested_at: latestJob.requested_at,
+      claimed_by: latestJob.claimed_by,
+      claimed_at: latestJob.claimed_at,
+      completed_at: latestJob.completed_at,
+      failed_at: latestJob.failed_at,
+      attempt_count: latestJob.attempt_count,
+      error_text: latestJob.error_text,
+      payload: latestJob.payload,
+      result: latestJob.result,
+    } : null,
+  };
+}
+
+async function buildCustomQuerySyncState(queryName, sqlHash, maxRows = null) {
+  const normalizedName = normalizeCustomQueryName(queryName);
+  const normalizedHash = String(sqlHash || "").trim();
+  const [snapshotMeta, latestJob] = await Promise.all([
+    service.findLatestCustomQuerySnapshot(normalizedName, normalizedHash, { maxRows, limit: 20 }),
+    service.findLatestCustomQueryJob(normalizedName, normalizedHash, { maxRows, limit: 60 }),
+  ]);
+
+  let status = "idle";
+  if (snapshotMeta?.record_id) {
+    status = "ready";
+  } else if (latestJob?.status) {
+    status = latestJob.status;
+  }
+
+  return {
+    query_name: normalizedName,
+    sql_hash: normalizedHash,
+    status,
+    snapshot: snapshotMeta
+      ? {
+          available: true,
+          record_id: snapshotMeta.record_id || "",
+          row_count: Number(snapshotMeta.row_count || 0),
+          column_count: Number(snapshotMeta.column_count || 0),
+          uploaded_at: snapshotMeta.uploaded_at || "",
+          source_synced_at: snapshotMeta.source_synced_at || "",
+          requested_by: snapshotMeta.requested_by || "",
+          sql_preview: snapshotMeta.sql_preview || "",
+          truncated: Boolean(snapshotMeta.truncated),
+          max_rows: Number(snapshotMeta.max_rows || 0),
+        }
+      : {
+          available: false,
+          record_id: "",
+          row_count: 0,
+          column_count: 0,
+          uploaded_at: "",
+          source_synced_at: "",
+          requested_by: "",
+          sql_preview: "",
+          truncated: false,
+          max_rows: 0,
         },
     job: latestJob ? {
       id: latestJob.id,
@@ -2008,6 +2080,10 @@ app.get("/reports", requireAdminPage, (req, res) => {
 app.get("/beta-reports", requireAdminPage, (req, res) => {
   const { clientChoices, selectedClient } = clientChoicesWithSelected(req);
   res.render("beta-reports", { clientChoices, selectedClient });
+});
+
+app.get("/query-console", requireAdminPage, (_req, res) => {
+  res.render("query-console");
 });
 
 app.get("/empty-bins", requireAdminPage, (req, res) => {
@@ -3878,6 +3954,106 @@ app.get("/api/empty-bin/report-sync-status", requireAdminApi, async (req, res) =
   try {
     const sync = await buildEmptyBinReportSyncState(reportDate);
     return res.json({ ok: true, sync });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.get("/api/query-console/status", requireAdminApi, async (req, res) => {
+  const queryName = normalizeCustomQueryName(req.query.query_name);
+  const sqlHash = String(req.query.sql_hash || "").trim();
+  const maxRows = req.query.max_rows;
+  if (!sqlHash) {
+    return res.status(400).json({ ok: false, error: "sql_hash param required." });
+  }
+  try {
+    const sync = await buildCustomQuerySyncState(queryName, sqlHash, maxRows);
+    return res.json({ ok: true, sync });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.post("/api/query-console/run", requireAdminApi, async (req, res) => {
+  try {
+    const queryName = normalizeCustomQueryName(req.body?.query_name);
+    const sqlText = String(req.body?.sql_text || "");
+    const maxRows = req.body?.max_rows;
+    const requestState = await service.ensureCustomQueryJob({
+      queryName,
+      sqlText,
+      maxRows,
+      requestedBy: buildCustomQueryRequestedBy(req.currentUser),
+    });
+    const sync = requestState.ready && requestState.snapshot
+      ? {
+          query_name: requestState.query_name,
+          sql_hash: requestState.sql_hash,
+          status: "ready",
+          snapshot: {
+            available: true,
+            record_id: requestState.snapshot.record_id || "",
+            row_count: Number(requestState.snapshot.row_count || 0),
+            column_count: Number(requestState.snapshot.column_count || 0),
+            uploaded_at: requestState.snapshot.uploaded_at || "",
+            source_synced_at: requestState.snapshot.source_synced_at || "",
+            requested_by: requestState.snapshot.requested_by || "",
+            sql_preview: requestState.snapshot.sql_preview || "",
+            truncated: Boolean(requestState.snapshot.truncated),
+            max_rows: Number(requestState.snapshot.max_rows || 0),
+          },
+          job: null,
+        }
+      : await buildCustomQuerySyncState(requestState.query_name, requestState.sql_hash, requestState.max_rows);
+
+    return res.json({
+      ok: true,
+      created: Boolean(requestState.created),
+      ready: Boolean(requestState.ready),
+      query: {
+        query_name: requestState.query_name,
+        sql_hash: requestState.sql_hash,
+        max_rows: Number(requestState.max_rows || 0),
+      },
+      sync,
+    });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+app.get("/api/query-console/result", requireAdminApi, async (req, res) => {
+    const recordId = String(req.query.record_id || "").trim();
+    const queryName = normalizeCustomQueryName(req.query.query_name);
+    const sqlHash = String(req.query.sql_hash || "").trim();
+    const maxRows = req.query.max_rows;
+    try {
+      let targetRecordId = recordId;
+      if (!targetRecordId) {
+        if (!sqlHash) return res.status(400).json({ ok: false, error: "record_id or sql_hash param required." });
+        const snapshot = await service.findLatestCustomQuerySnapshot(queryName, sqlHash, { maxRows, limit: 20 });
+        if (!snapshot?.record_id) return res.status(404).json({ ok: false, error: "No query result is available yet." });
+        targetRecordId = snapshot.record_id;
+      }
+    const result = await service.loadCustomQuerySnapshot(targetRecordId);
+    return res.json({
+      ok: true,
+      result: {
+        record_id: result.meta?.record_id || targetRecordId,
+        query_name: result.query_name || queryName,
+        sql_hash: result.meta?.sql_hash || sqlHash,
+        sql_preview: result.meta?.sql_preview || "",
+        row_count: Number(result.meta?.row_count || result.rows?.length || 0),
+        column_count: Number(result.meta?.column_count || result.columns?.length || 0),
+        uploaded_at: result.meta?.uploaded_at || "",
+        source_synced_at: result.meta?.source_synced_at || "",
+        requested_by: result.meta?.requested_by || "",
+        truncated: Boolean(result.meta?.truncated),
+        max_rows: Number(result.meta?.max_rows || 0),
+        columns: Array.isArray(result.columns) ? result.columns : [],
+        rows: Array.isArray(result.rows) ? result.rows : [],
+      },
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err.message || err) });
   }

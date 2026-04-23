@@ -1,0 +1,55 @@
+<%- include('partials/head', { pageTitle: 'SQL Console' }) %>
+<div class="app-shell">
+<%- include('partials/header', { activePage: 'query-console' }) %>
+<div class="main">
+<%- include('partials/topbar', { pageLabel: 'SQL Console' }) %>
+<div class="pc pc-scroll">
+
+  <main class="sql-console-shell">
+    <section class="sql-console-hero">
+      <div>
+        <div class="sql-console-kicker">Warehouse Query Console</div>
+        <h1 class="sql-console-title">Run read-only warehouse SQL through the sync worker</h1>
+        <p class="sql-console-copy">Paste a single <code>SELECT</code> or <code>WITH</code> statement, queue it, and the result will come back into repo-app as a table once the warehouse sync agent finishes the export.</p>
+      </div>
+      <div class="sql-console-badge">Worker-backed</div>
+    </section>
+
+    <section class="sql-console-workbench">
+      <div class="sql-console-toolbar">
+        <label class="sql-console-field">
+          <span>Query name</span>
+          <input id="qcQueryName" type="text" maxlength="120" placeholder="PC Zone stock pressure">
+        </label>
+        <label class="sql-console-field sql-console-field--short">
+          <span>Max rows</span>
+          <input id="qcMaxRows" type="number" min="1" max="50000" value="2000">
+        </label>
+        <button class="btn btn--primary sql-console-run" id="qcRunButton" type="button">Run query</button>
+      </div>
+
+      <label class="sql-console-editor-wrap">
+        <span class="sql-console-label">SQL</span>
+        <textarea id="qcSql" class="sql-console-editor" spellcheck="false" placeholder="SELECT * FROM SMARTDATA.BINLOC WHERE BLWLOC = 'CGR' FETCH FIRST 250 ROWS ONLY"></textarea>
+      </label>
+
+      <section class="sql-console-status" id="qcStatus">
+        <div class="sql-console-status__title">Ready when you are.</div>
+        <div class="sql-console-status__meta">The worker only accepts one read-only SELECT or WITH statement at a time.</div>
+      </section>
+    </section>
+
+    <section class="sql-console-results" id="qcResults">
+      <div class="sql-console-empty">Run a query to see the output table here.</div>
+    </section>
+  </main>
+
+</div>
+</div>
+</div>
+
+<script src="/js/site.js?v=<%= assetVersion %>"></script>
+<link rel="stylesheet" href="/css/query-console.css?v=<%= assetVersion %>" />
+<script src="/js/query-console.js?v=<%= assetVersion %>"></script>
+</body>
+</html>

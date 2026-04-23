@@ -8,6 +8,7 @@ let _pollTimer = null;
 let _reportSync = null;
 let _reportSyncTimer = null;
 let _reportSyncReadyToast = false;
+const EMPTY_BIN_BOOTSTRAP_PREFIX = "repo-empty-bin-bootstrap:";
 
 const selClient = () => document.getElementById("eSelClient");
 const selArea = () => document.getElementById("eSelArea");
@@ -18,6 +19,31 @@ const selLimit = () => document.getElementById("eSelLimit");
 
 function fmt(n) {
   return Number(n ?? 0).toLocaleString();
+}
+
+function computeTaskSummary(task, summary = null) {
+  const items = Array.isArray(task?.items) ? task.items : [];
+  return {
+    checked_count: items.filter((item) => item.status && item.status !== "pending" && item.status !== "system_cleared").length,
+    pending_count: items.filter((item) => item.status === "pending").length,
+    system_cleared_count: items.filter((item) => item.status === "system_cleared").length,
+    photo_count: items.reduce((sum, item) => sum + ((item.photos || []).length), 0),
+    ...(summary && typeof summary === "object" ? summary : {}),
+  };
+}
+
+function storeBootstrapTask(taskId, task, summary = null) {
+  if (!taskId || !task) return;
+  try {
+    sessionStorage.setItem(
+      `${EMPTY_BIN_BOOTSTRAP_PREFIX}${String(taskId).trim()}`,
+      JSON.stringify({
+        task,
+        summary: computeTaskSummary(task, summary),
+        cachedAt: new Date().toISOString(),
+      })
+    );
+  } catch (_) {}
 }
 
 function formatDateTimeText(value) {
@@ -583,7 +609,8 @@ async function createTaskFromFilters() {
         limit: selLimit().value,
       }),
     });
-    await apiJson(`/api/empty-bin/tasks/${encodeURIComponent(created.task.id)}/assign`, { method: "POST", body: "{}" });
+    const assigned = await apiJson(`/api/empty-bin/tasks/${encodeURIComponent(created.task.id)}/assign`, { method: "POST", body: "{}" });
+    storeBootstrapTask(created.task.id, assigned.task, assigned.summary);
     window.location.href = `/empty-bins/tasks/${encodeURIComponent(created.task.id)}`;
   } catch (err) {
     window.RepoApp?.toast?.(err.message, "error");
@@ -604,6 +631,7 @@ async function handleTaskAction(action) {
   try {
     const data = await apiJson(endpoint, { method: "POST", body: "{}" });
     if (action === "followup") {
+      if (data.full_task?.id) storeBootstrapTask(data.full_task.id, data.full_task, data.task);
       await loadTasks();
       await loadTask(data.task.id);
     } else {
