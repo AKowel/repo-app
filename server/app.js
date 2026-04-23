@@ -148,6 +148,34 @@ function buildCatalogDimensionMap(snapshot) {
   return map;
 }
 
+function getCatalogItemDescription(row) {
+  return String(
+    row?.description ||
+    row?.description_short ||
+    row?.item_description ||
+    row?.ITDESC ||
+    row?.itdesc ||
+    row?.IDESC ||
+    row?.idesc ||
+    ""
+  ).trim();
+}
+
+function buildCatalogItemMetaMap(snapshot) {
+  const map = new Map();
+  for (const row of (snapshot?.items || [])) {
+    const sku = String(row?.sku || row?.ITITEM || row?.ititem || "").trim().toUpperCase();
+    if (!sku) continue;
+    const description = getCatalogItemDescription(row);
+    map.set(sku, {
+      sku,
+      description,
+      sku_label: description ? `${sku} - ${description}` : sku,
+    });
+  }
+  return map;
+}
+
 function getBinlocLocation(row) {
   return String(row?.BLBINL || row?.bin_location || row?.location || "").trim().toUpperCase();
 }
@@ -2440,12 +2468,19 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
           latest_period_pick_qty: 0,
         },
         signals: {
+          action_list: [],
           consistent_candidates: [],
           temporary_candidates: [],
           volatility_watchlist: [],
           pc_review: [],
           repeat_patterns: [],
+          new_movers: [],
+          declining_skus: [],
+          changed_since_previous_day: [],
+          weekday_patterns: [],
+          spike_sources: [],
         },
+        pc_pressure: { bin_sizes: [], conflicts: [] },
         period_breakdown: [],
         sku_period_matrix: [],
       });
@@ -2455,7 +2490,7 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
       .then(filterCompleteSnapshotDates)
       .catch(() => []);
 
-    const [orderLineResults, pickTransactionResults, binlocResult] = await Promise.all([
+    const [orderLineResults, pickTransactionResults, binlocResult, catalogResult] = await Promise.all([
       Promise.all(loadedDates.map(d => service.loadSnapshot("order_lines", client, d).catch(() => ({ rows: [] })))),
       Promise.all(loadedDates.map(d =>
         trxAvailableDates.includes(d)
@@ -2463,11 +2498,16 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
           : Promise.resolve({ rows: [] })
       )),
       service.loadSnapshot("binloc", client, null).catch(() => ({ rows: [] })),
+      service.loadCatalogSnapshot(client).catch(() => ({ snapshot: null, meta: null })),
     ]);
 
     const targetClient = normalizeClientCode(client);
     const rawBinlocRows = binlocResult.rows || [];
     const binlocAvail = rawBinlocRows.length > 0;
+    const catalogMetaMap = buildCatalogItemMetaMap(catalogResult?.snapshot);
+    const itemDimensionMap = buildCatalogDimensionMap(catalogResult?.snapshot);
+    const configuredBinSizes = getConfiguredBinSizes();
+    const emptyPcBinSizeMap = new Map();
     const enrichMap = new Map();
     const skuInventoryMap = new Map();
 
@@ -2475,6 +2515,8 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
       return {
         low_level_non_pc_capacity: 0,
         low_level_pc_capacity: 0,
+        low_level_non_pc_usable_volume_mm3: 0,
+        low_level_pc_usable_volume_mm3: 0,
         low_level_non_pc_locations: new Set(),
         low_level_pc_locations: new Set(),
         low_level_non_pc_bin_sizes: new Set(),
@@ -2485,6 +2527,38 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
     function getSkuInventory(sku) {
       if (!skuInventoryMap.has(sku)) skuInventoryMap.set(sku, initSkuInventory());
       return skuInventoryMap.get(sku);
+    }
+
+    function getSkuMeta(sku) {
+      const normalizedSku = String(sku || "").trim().toUpperCase();
+      return catalogMetaMap.get(normalizedSku) || {
+        sku: normalizedSku,
+        description: "",
+        sku_label: normalizedSku,
+      };
+    }
+
+    function getOrInit(map, key, init) {
+      if (!map.has(key)) map.set(key, init());
+      return map.get(key);
+    }
+
+    function addEmptyPcBin(row, loc, binSize, binType, binDims, binUsableVolume) {
+      const key = binSize || "-";
+      const entry = emptyPcBinSizeMap.get(key) || {
+        bin_size: key,
+        bin_type: binType,
+        empty_location_count: 0,
+        dimensions_configured: Boolean(binDims),
+        height_mm: binDims ? binDims.height : null,
+        width_mm: binDims ? binDims.width : null,
+        depth_mm: binDims ? binDims.depth : null,
+        usable_volume_mm3: binUsableVolume || null,
+        example_locations: [],
+      };
+      entry.empty_location_count++;
+      if (entry.example_locations.length < 8) entry.example_locations.push(loc);
+      emptyPcBinSizeMap.set(key, entry);
     }
 
     for (const row of rawBinlocRows) {
@@ -2499,6 +2573,14 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
       const maxBinQty = Number(row.BLMAXQ || row.max_bin_qty || 0);
       const levelNum = getLocationLevelNumber(loc);
       const isPc = isPcOperatingArea(operatingArea);
+      const status = String(row.BLSTS || row.status || "Y").trim().toUpperCase();
+      const currentQty = Number(row.BLQTY || row.qty || row["Item Qty"] || 0);
+      const adjustedQty = Number(row.BLADJQ || row.item_adjust || 0);
+      const pickedQty = Number(row.BLPICQ || row.item_picked || 0);
+      const kitQty = Number(row.BLKITQ || 0);
+      const isEmptyLocation = currentQty <= 0 && adjustedQty <= 0 && pickedQty <= 0 && kitQty <= 0;
+      const binDims = configuredBinSizes[binSize] || null;
+      const binUsableVolume = usableBinVolume(binDims);
 
       enrichMap.set(loc, {
         operating_area: operatingArea || "-",
@@ -2509,16 +2591,22 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
         level_num: levelNum,
       });
 
+      if (status === "Y" && isPc && levelNum < HIGH_LEVEL_THRESHOLD && isEmptyLocation) {
+        addEmptyPcBin(row, loc, binSize, binType, binDims, binUsableVolume);
+      }
+
       const sku = String(row.BLITEM || row.sku || "").trim().toUpperCase();
       if (!sku || levelNum >= HIGH_LEVEL_THRESHOLD) continue;
 
       const inv = getSkuInventory(sku);
       if (isPc) {
         inv.low_level_pc_capacity += maxBinQty;
+        inv.low_level_pc_usable_volume_mm3 += binUsableVolume;
         inv.low_level_pc_locations.add(loc);
         if (binSize) inv.low_level_pc_bin_sizes.add(binSize);
       } else {
         inv.low_level_non_pc_capacity += maxBinQty;
+        inv.low_level_non_pc_usable_volume_mm3 += binUsableVolume;
         inv.low_level_non_pc_locations.add(loc);
         if (binSize) inv.low_level_non_pc_bin_sizes.add(binSize);
       }
@@ -2565,9 +2653,17 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
           non_pc_locations: new Set(),
           channels: new Set(),
           active_days: new Set(),
+          daily_qty: new Map(),
+          weekday_qty: new Map(),
+          weekday_lines: new Map(),
+          order_qty: new Map(),
+          customer_qty: new Map(),
           period_qty: new Map(),
           period_lines: new Map(),
           period_orders: new Map(),
+          period_order_qty: new Map(),
+          channel_breakdown: new Map(),
+          location_breakdown: new Map(),
         });
       }
       const entry = skuMap.get(sku);
@@ -2612,6 +2708,9 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
         const isLowLevel = levelNum < HIGH_LEVEL_THRESHOLD;
         const isPc = Boolean(enrich.is_pc);
         const ord = String(row.order_number || "").trim();
+        const customer = String(row.customer_name || "").trim();
+        const snapDateObj = ymdToUtcDate(snapDate);
+        const weekday = snapDateObj ? snapDateObj.getUTCDay() : null;
 
         totalPickQty += qty;
         totalLineCount++;
@@ -2636,10 +2735,50 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
         if (loc) skuEntry.locations.add(loc);
         if (ch) skuEntry.channels.add(ch);
         skuEntry.active_days.add(snapDate);
+        skuEntry.daily_qty.set(snapDate, (skuEntry.daily_qty.get(snapDate) || 0) + qty);
+        if (weekday !== null) {
+          skuEntry.weekday_qty.set(weekday, (skuEntry.weekday_qty.get(weekday) || 0) + qty);
+          skuEntry.weekday_lines.set(weekday, (skuEntry.weekday_lines.get(weekday) || 0) + 1);
+        }
+        if (ord) skuEntry.order_qty.set(ord, (skuEntry.order_qty.get(ord) || 0) + qty);
+        if (customer) skuEntry.customer_qty.set(customer, (skuEntry.customer_qty.get(customer) || 0) + qty);
+        if (ch) {
+          const channelEntry = getOrInit(skuEntry.channel_breakdown, ch, () => ({
+            channel: ch,
+            label: clientChannelLabels[ch] || ch,
+            pick_qty: 0,
+            line_count: 0,
+            orders: new Set(),
+          }));
+          channelEntry.pick_qty += qty;
+          channelEntry.line_count++;
+          if (ord) channelEntry.orders.add(ord);
+        }
+        if (loc) {
+          const locEntry = getOrInit(skuEntry.location_breakdown, loc, () => ({
+            location: loc,
+            operating_area: enrich.operating_area,
+            bin_size: enrich.bin_size,
+            bin_type: enrich.bin_type,
+            max_bin_qty: enrich.max_bin_qty,
+            level_num: levelNum,
+            is_pc: isPc,
+            pick_qty: 0,
+            line_count: 0,
+            orders: new Set(),
+          }));
+          locEntry.pick_qty += qty;
+          locEntry.line_count++;
+          if (ord) locEntry.orders.add(ord);
+        }
         skuEntry.period_qty.set(periodKey, (skuEntry.period_qty.get(periodKey) || 0) + qty);
         skuEntry.period_lines.set(periodKey, (skuEntry.period_lines.get(periodKey) || 0) + 1);
         if (!skuEntry.period_orders.has(periodKey)) skuEntry.period_orders.set(periodKey, new Set());
         if (ord) skuEntry.period_orders.get(periodKey).add(ord);
+        if (ord) {
+          const periodOrderMap = getOrInit(skuEntry.period_order_qty, periodKey, () => new Map());
+          periodOrderMap.set(ord, (periodOrderMap.get(ord) || 0) + qty);
+        }
 
         if (periodEntry) {
           periodEntry.pick_qty += qty;
@@ -2659,6 +2798,8 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
       return {
         low_level_non_pc_capacity: inv.low_level_non_pc_capacity,
         low_level_pc_capacity: inv.low_level_pc_capacity,
+        low_level_non_pc_usable_volume_mm3: inv.low_level_non_pc_usable_volume_mm3,
+        low_level_pc_usable_volume_mm3: inv.low_level_pc_usable_volume_mm3,
         low_level_non_pc_location_count: inv.low_level_non_pc_locations.size,
         low_level_pc_location_count: inv.low_level_pc_locations.size,
         current_bin_sizes: [...inv.low_level_non_pc_bin_sizes].sort().join(", "),
@@ -2668,6 +2809,73 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
 
     const latestPeriodKey = periodKeys[periodKeys.length - 1] || "";
     const previousPeriodKey = periodKeys[periodKeys.length - 2] || "";
+    const loadedDatesAscending = [...loadedDates].sort();
+    const latestLoadedDate = loadedDatesAscending[loadedDatesAscending.length - 1] || "";
+    const previousLoadedDate = loadedDatesAscending[loadedDatesAscending.length - 2] || "";
+    const availablePcBinTypes = [...emptyPcBinSizeMap.values()]
+      .filter(bin => Number(bin.usable_volume_mm3 || 0) > 0)
+      .sort((a, b) =>
+        Number(b.empty_location_count || 0) - Number(a.empty_location_count || 0) ||
+        String(a.bin_size).localeCompare(String(b.bin_size))
+      );
+    const weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+    function estimateSkuUnitVolumeMm3(sku, inventory) {
+      const itemDims = itemDimensionMap.get(sku);
+      const itemVolume = binSizeVolume(itemDims);
+      if (itemVolume > 0) {
+        return { unit_volume_mm3: itemVolume, capacity_source: "item_dimensions" };
+      }
+      if (inventory.low_level_non_pc_capacity > 0 && inventory.low_level_non_pc_usable_volume_mm3 > 0) {
+        return {
+          unit_volume_mm3: inventory.low_level_non_pc_usable_volume_mm3 / inventory.low_level_non_pc_capacity,
+          capacity_source: "current_bin_density",
+        };
+      }
+      if (inventory.low_level_pc_capacity > 0 && inventory.low_level_pc_usable_volume_mm3 > 0) {
+        return {
+          unit_volume_mm3: inventory.low_level_pc_usable_volume_mm3 / inventory.low_level_pc_capacity,
+          capacity_source: "pc_bin_density",
+        };
+      }
+      return { unit_volume_mm3: 0, capacity_source: "" };
+    }
+
+    function scorePcBinOptions(sku, demandQty, currentReplens, inventory) {
+      const unitEstimate = estimateSkuUnitVolumeMm3(sku, inventory);
+      const options = [];
+      for (const bin of availablePcBinTypes) {
+        const estimatedCapacity = unitEstimate.unit_volume_mm3 > 0
+          ? Math.floor(Number(bin.usable_volume_mm3 || 0) / unitEstimate.unit_volume_mm3)
+          : 0;
+        if (!(estimatedCapacity > 0)) continue;
+        const estimatedReplens = safeCeilDiv(demandQty, estimatedCapacity);
+        options.push({
+          bin_size: bin.bin_size,
+          empty_location_count: bin.empty_location_count,
+          estimated_pc_capacity: estimatedCapacity,
+          estimated_replenishments_in_pc: estimatedReplens,
+          estimated_replenishments_delta: (
+            currentReplens != null && estimatedReplens != null ? currentReplens - estimatedReplens : null
+          ),
+          estimated_pc_locations_needed: estimatedCapacity > 0 ? Math.max(1, safeCeilDiv(demandQty, estimatedCapacity) || 1) : null,
+          capacity_source: unitEstimate.capacity_source,
+        });
+      }
+      options.sort((a, b) =>
+        (b.estimated_replenishments_delta ?? -999999) - (a.estimated_replenishments_delta ?? -999999) ||
+        b.estimated_pc_capacity - a.estimated_pc_capacity ||
+        b.empty_location_count - a.empty_location_count ||
+        String(a.bin_size).localeCompare(String(b.bin_size))
+      );
+      return options;
+    }
+
+    function confidenceLabel(score) {
+      if (score >= 75) return "High";
+      if (score >= 50) return "Medium";
+      return "Low";
+    }
 
     const skuRows = [...skuMap.values()].map(entry => {
       const periodValues = periodKeys.map(key => Number(entry.period_qty.get(key) || 0));
@@ -2704,9 +2912,119 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
         ((Math.min(maxPeriodQty / Math.max(avgPeriodPickQty, 1), 5) / 5) * 20) +
         (Math.min(entry.pick_qty / 500, 1) * 25)
       );
+      const skuMeta = getSkuMeta(entry.sku);
+      const latestDayQty = Number(entry.daily_qty.get(latestLoadedDate) || 0);
+      const previousDayQty = Number(entry.daily_qty.get(previousLoadedDate) || 0);
+      const dayChangeQty = latestDayQty - previousDayQty;
+      const dayChangePct = previousDayQty > 0 ? roundNumber((dayChangeQty / previousDayQty) * 100, 1) : (latestDayQty > 0 ? 100 : 0);
+      const latestOrderMap = entry.period_order_qty.get(latestPeriodKey) || new Map();
+      const latestOrderValues = [...latestOrderMap.entries()].sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0));
+      const largestLatestOrder = latestOrderValues[0] || ["", 0];
+      const largestLatestOrderShare = latestPeriodQty > 0 ? roundPct(largestLatestOrder[1], latestPeriodQty) : 0;
+      const spikeSource = latestPeriodQty > 0 && spikeRatio >= 2
+        ? (largestLatestOrderShare >= 50 ? "single_order" : (latestOrderValues.slice(0, 3).reduce((sum, row) => sum + Number(row[1] || 0), 0) / latestPeriodQty >= 0.75 ? "few_orders" : "broad_demand"))
+        : "none";
+      const spikeSourceLabel = spikeSource === "single_order"
+        ? `Single order ${largestLatestOrder[0]} drove ${largestLatestOrderShare}% of latest period`
+        : spikeSource === "few_orders"
+          ? "A small number of orders drove the latest spike"
+          : spikeSource === "broad_demand"
+            ? "Spike appears spread across multiple orders"
+            : "";
+      const channelBreakdown = [...entry.channel_breakdown.values()]
+        .sort((a, b) => b.pick_qty - a.pick_qty || String(a.channel).localeCompare(String(b.channel)))
+        .map(channel => ({
+          channel: channel.channel,
+          label: channel.label,
+          pick_qty: channel.pick_qty,
+          line_count: channel.line_count,
+          order_count: channel.orders.size,
+          share_of_sku: roundPct(channel.pick_qty, entry.pick_qty),
+        }));
+      const primaryChannel = channelBreakdown[0] || null;
+      const locationBreakdown = [...entry.location_breakdown.values()]
+        .sort((a, b) => b.pick_qty - a.pick_qty || String(a.location).localeCompare(String(b.location)))
+        .slice(0, 20)
+        .map(location => ({
+          location: location.location,
+          operating_area: location.operating_area,
+          bin_size: location.bin_size,
+          bin_type: location.bin_type,
+          max_bin_qty: location.max_bin_qty,
+          level_num: location.level_num,
+          is_pc: location.is_pc,
+          pick_qty: location.pick_qty,
+          line_count: location.line_count,
+          order_count: location.orders.size,
+        }));
+      const weekdayBreakdown = [...entry.weekday_qty.entries()]
+        .map(([weekday, qty]) => ({
+          weekday: Number(weekday),
+          label: weekdayNames[Number(weekday)] || String(weekday),
+          pick_qty: qty,
+          line_count: entry.weekday_lines.get(weekday) || 0,
+          share_of_sku: roundPct(qty, entry.pick_qty),
+        }))
+        .sort((a, b) => b.pick_qty - a.pick_qty || a.weekday - b.weekday);
+      const primaryWeekday = weekdayBreakdown[0] || null;
+      const isNewMover = periodKeys.length >= 3 && latestPeriodQty > 0 && baselineAvgPeriodQty <= Math.max(10, latestPeriodQty * 0.35) && activePeriodCount <= Math.max(2, Math.ceil(periodKeys.length * 0.45));
+      const declineRatio = baselineAvgPeriodQty > 0 ? latestPeriodQty / baselineAvgPeriodQty : 1;
+      const isDeclining = entry.pc_pick_qty > 0 && periodKeys.length >= 2 && latestPeriodQty < previousPeriodQty && declineRatio <= 0.6;
+      const declineScore = isDeclining ? Math.round((1 - Math.max(0, declineRatio)) * 70 + Math.min(entry.pc_pick_qty / 200, 1) * 30) : 0;
+      const pcBinOptions = scorePcBinOptions(entry.sku, entry.low_level_non_pc_pick_qty, currentReplens, inventory);
+      const bestPcBinOption = pcBinOptions[0] || null;
+      const estimatedReplensDelta = bestPcBinOption?.estimated_replenishments_delta ?? null;
+      const pickTransactionCoverage = loadedDates.length ? loadedDates.filter(d => trxAvailableDates.includes(d)).length / loadedDates.length : 0;
+      const confidenceScore = Math.round(
+        (Math.min(periodKeys.length / 8, 1) * 20) +
+        (pickTransactionCoverage * 25) +
+        (activePeriodRatio * 20) +
+        (Math.min(entry.pick_qty / 400, 1) * 15) +
+        (binlocAvail ? 10 : 0) +
+        ((bestPcBinOption?.capacity_source || itemDimensionMap.has(entry.sku)) ? 10 : 0)
+      );
+      const reasonParts = [];
+      if (activePeriodCount > 0) reasonParts.push(`Active in ${activePeriodCount}/${periodKeys.length || 1} ${compare === "month" ? "months" : "weeks"}`);
+      if (entry.low_level_non_pc_pick_qty > 0) reasonParts.push(`${entry.low_level_non_pc_pick_qty.toLocaleString()} picks below level 20 outside PC`);
+      if (estimatedReplensDelta != null && estimatedReplensDelta > 0) reasonParts.push(`${estimatedReplensDelta.toLocaleString()} fewer estimated replenishments in ${bestPcBinOption.bin_size}`);
+      if (spikeRatio >= 2) reasonParts.push(`${roundNumber(spikeRatio, 1)}x latest-period spike`);
+      if (primaryChannel) reasonParts.push(`${primaryChannel.share_of_sku}% ${primaryChannel.label}`);
+      if (primaryWeekday && primaryWeekday.share_of_sku >= 45) reasonParts.push(`${primaryWeekday.share_of_sku}% picked on ${primaryWeekday.label}s`);
+      if (isDeclining) reasonParts.push("Latest period is materially below baseline");
+
+      let recommendationType = "Watch only";
+      if (isDeclining && entry.pc_pick_qty > 0 && consistencyScore < 60) {
+        recommendationType = "Remove from PC";
+      } else if (entry.pc_pick_qty > 0 && consistencyScore >= 60 && volatilityScore < 70) {
+        recommendationType = "Keep in PC";
+      } else if (entry.low_level_non_pc_pick_qty > 0 && isNewMover) {
+        recommendationType = "Temporary PC";
+      } else if (entry.low_level_non_pc_pick_qty > 0 && spikeScore >= 70 && consistencyScore < 68) {
+        recommendationType = "Temporary PC";
+      } else if (entry.low_level_non_pc_pick_qty > 0 && consistencyScore >= 65) {
+        recommendationType = "Move to PC";
+      }
+
+      const recommendationRank = {
+        "Move to PC": 5,
+        "Temporary PC": 4,
+        "Keep in PC": 3,
+        "Remove from PC": 2,
+        "Watch only": 1,
+      }[recommendationType] || 1;
+      const actionPriorityScore = Math.round(
+        (recommendationRank * 12) +
+        (consistencyScore * 0.26) +
+        (spikeScore * 0.18) +
+        (volatilityScore * 0.08) +
+        (Math.min(Math.max(estimatedReplensDelta || 0, 0), 20) * 1.4) +
+        (confidenceScore * 0.18)
+      );
 
       return {
         sku: entry.sku,
+        sku_label: skuMeta.sku_label,
+        description: skuMeta.description,
         item_group: entry.item_group,
         total_pick_qty: entry.pick_qty,
         total_line_count: entry.line_count,
@@ -2728,10 +3046,36 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
         baseline_avg_period_qty: roundNumber(baselineAvgPeriodQty, 2),
         max_period_qty: maxPeriodQty,
         spike_ratio: roundNumber(spikeRatio, 2),
+        spike_source: spikeSource,
+        spike_source_label: spikeSourceLabel,
+        largest_latest_order_number: largestLatestOrder[0],
+        largest_latest_order_qty: Number(largestLatestOrder[1] || 0),
+        largest_latest_order_share: largestLatestOrderShare,
+        latest_day_qty: latestDayQty,
+        previous_day_qty: previousDayQty,
+        day_change_qty: dayChangeQty,
+        day_change_pct: dayChangePct,
         consistency_score: Math.max(0, Math.min(consistencyScore, 100)),
         spike_score: Math.max(0, Math.min(spikeScore, 100)),
         volatility_score: Math.max(0, Math.min(volatilityScore, 100)),
+        confidence_score: Math.max(0, Math.min(confidenceScore, 100)),
+        confidence_label: confidenceLabel(confidenceScore),
+        recommendation_type: recommendationType,
+        recommendation_reason: reasonParts.slice(0, 5).join("; "),
+        recommendation_reasons: reasonParts,
+        action_priority_score: Math.max(0, Math.min(actionPriorityScore, 100)),
+        is_new_mover: isNewMover,
+        is_declining: isDeclining,
+        decline_score: Math.max(0, Math.min(declineScore, 100)),
         current_estimated_replenishments: currentReplens,
+        recommended_bin_size: bestPcBinOption?.bin_size || "",
+        recommended_empty_locations: bestPcBinOption?.empty_location_count ?? null,
+        recommended_pc_capacity: bestPcBinOption?.estimated_pc_capacity ?? null,
+        estimated_replenishments_in_pc: bestPcBinOption?.estimated_replenishments_in_pc ?? null,
+        estimated_replenishments_delta: estimatedReplensDelta,
+        estimated_pc_locations_needed: bestPcBinOption?.estimated_pc_locations_needed ?? null,
+        capacity_source: bestPcBinOption?.capacity_source || "",
+        pc_bin_options: pcBinOptions.slice(0, 5),
         period_values: periodKeys.map((key, index) => ({
           key,
           label: periods[index]?.label || key,
@@ -2741,6 +3085,14 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
         })),
         channel_count: entry.channels.size,
         channels: [...entry.channels].sort(),
+        channel_breakdown: channelBreakdown,
+        primary_channel: primaryChannel?.channel || "",
+        primary_channel_label: primaryChannel?.label || "",
+        primary_channel_share: primaryChannel?.share_of_sku || 0,
+        location_breakdown: locationBreakdown,
+        weekday_breakdown: weekdayBreakdown,
+        primary_weekday: primaryWeekday?.label || "",
+        primary_weekday_share: primaryWeekday?.share_of_sku || 0,
         ...inventory,
       };
     });
@@ -2804,15 +3156,131 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
       )
       .slice(0, limit);
 
-    const periodBreakdown = [...periodMap.values()].map(period => {
-      let topSku = "";
-      let topSkuQty = 0;
-      for (const [sku, qty] of period.sku_qty) {
-        if (qty > topSkuQty) {
-          topSku = sku;
-          topSkuQty = qty;
-        }
+    const actionList = skuRows
+      .filter(row => row.recommendation_type && row.recommendation_type !== "Watch only")
+      .sort((a, b) =>
+        b.action_priority_score - a.action_priority_score ||
+        b.confidence_score - a.confidence_score ||
+        b.total_pick_qty - a.total_pick_qty ||
+        a.sku.localeCompare(b.sku)
+      )
+      .slice(0, limit);
+
+    const newMovers = skuRows
+      .filter(row => row.is_new_mover)
+      .sort((a, b) =>
+        b.latest_period_qty - a.latest_period_qty ||
+        b.spike_score - a.spike_score ||
+        a.sku.localeCompare(b.sku)
+      )
+      .slice(0, limit);
+
+    const decliningSkus = skuRows
+      .filter(row => row.is_declining)
+      .sort((a, b) =>
+        b.decline_score - a.decline_score ||
+        b.pc_pick_qty - a.pc_pick_qty ||
+        a.sku.localeCompare(b.sku)
+      )
+      .slice(0, limit);
+
+    const changedSincePreviousDay = skuRows
+      .filter(row => row.latest_day_qty > 0 || row.previous_day_qty > 0)
+      .sort((a, b) =>
+        Math.abs(b.day_change_qty) - Math.abs(a.day_change_qty) ||
+        b.latest_day_qty - a.latest_day_qty ||
+        a.sku.localeCompare(b.sku)
+      )
+      .slice(0, limit);
+
+    const weekdayPatterns = skuRows
+      .filter(row => row.primary_weekday_share >= 45 && row.active_day_count >= 2)
+      .sort((a, b) =>
+        b.primary_weekday_share - a.primary_weekday_share ||
+        b.total_pick_qty - a.total_pick_qty ||
+        a.sku.localeCompare(b.sku)
+      )
+      .slice(0, limit);
+
+    const spikeSources = skuRows
+      .filter(row => row.spike_source && row.spike_source !== "none")
+      .sort((a, b) =>
+        b.spike_score - a.spike_score ||
+        b.latest_period_qty - a.latest_period_qty ||
+        a.sku.localeCompare(b.sku)
+      )
+      .slice(0, limit);
+
+    const pcPressureMap = new Map();
+    for (const bin of emptyPcBinSizeMap.values()) {
+      pcPressureMap.set(bin.bin_size, {
+        bin_size: bin.bin_size,
+        bin_type: bin.bin_type,
+        empty_location_count: bin.empty_location_count,
+        candidate_count: 0,
+        action_candidate_count: 0,
+        estimated_locations_needed: 0,
+        total_candidate_pick_qty: 0,
+        top_candidates: [],
+        example_locations: bin.example_locations,
+      });
+    }
+    for (const row of skuRows.filter(row => row.recommended_bin_size)) {
+      const pressure = getOrInit(pcPressureMap, row.recommended_bin_size, () => ({
+        bin_size: row.recommended_bin_size,
+        bin_type: "",
+        empty_location_count: row.recommended_empty_locations || 0,
+        candidate_count: 0,
+        action_candidate_count: 0,
+        estimated_locations_needed: 0,
+        total_candidate_pick_qty: 0,
+        top_candidates: [],
+        example_locations: [],
+      }));
+      pressure.candidate_count++;
+      if (row.recommendation_type !== "Watch only") pressure.action_candidate_count++;
+      pressure.estimated_locations_needed += Number(row.estimated_pc_locations_needed || 1);
+      pressure.total_candidate_pick_qty += Number(row.low_level_non_pc_pick_qty || 0);
+      if (pressure.top_candidates.length < 8) {
+        pressure.top_candidates.push({
+          sku: row.sku,
+          sku_label: row.sku_label,
+          recommendation_type: row.recommendation_type,
+          low_level_non_pc_pick_qty: row.low_level_non_pc_pick_qty,
+          estimated_locations_needed: row.estimated_pc_locations_needed,
+        });
       }
+    }
+    const pcPressureRows = [...pcPressureMap.values()]
+      .map(row => ({
+        ...row,
+        pressure_ratio: row.empty_location_count > 0
+          ? roundNumber(row.estimated_locations_needed / row.empty_location_count, 2)
+          : (row.estimated_locations_needed > 0 ? 999 : 0),
+        oversubscribed_by: Math.max(Number(row.estimated_locations_needed || 0) - Number(row.empty_location_count || 0), 0),
+      }))
+      .sort((a, b) =>
+        b.pressure_ratio - a.pressure_ratio ||
+        b.total_candidate_pick_qty - a.total_candidate_pick_qty ||
+        String(a.bin_size).localeCompare(String(b.bin_size))
+      );
+    const pcPressureConflicts = pcPressureRows.filter(row => row.oversubscribed_by > 0 || row.action_candidate_count > row.empty_location_count);
+
+    const periodBreakdown = [...periodMap.values()].map(period => {
+      const topSkus = [...period.sku_qty.entries()]
+        .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0) || String(a[0]).localeCompare(String(b[0])))
+        .slice(0, 10)
+        .map(([sku, qty]) => {
+          const skuMeta = getSkuMeta(sku);
+          return {
+            sku,
+            sku_label: skuMeta.sku_label,
+            description: skuMeta.description,
+            pick_qty: qty,
+          };
+        });
+      const topSku = topSkus[0]?.sku || "";
+      const topSkuMeta = getSkuMeta(topSku);
       return {
         key: period.key,
         label: period.label,
@@ -2828,7 +3296,10 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
         low_level_non_pc_pick_qty: period.low_level_non_pc_pick_qty,
         pc_share: roundPct(period.pc_pick_qty, period.pick_qty),
         top_sku: topSku,
-        top_sku_qty: topSkuQty,
+        top_sku_label: topSkuMeta.sku_label,
+        top_sku_description: topSkuMeta.description,
+        top_sku_qty: topSkus[0]?.pick_qty || 0,
+        top_skus: topSkus,
       };
     });
 
@@ -2838,6 +3309,8 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
       .slice(0, limit)
       .map(row => ({
         sku: row.sku,
+        sku_label: row.sku_label,
+        description: row.description,
         item_group: row.item_group,
         total_pick_qty: row.total_pick_qty,
         consistency_score: row.consistency_score,
@@ -2880,11 +3353,21 @@ app.get("/api/beta-reports-data", requireAdminApi, async (req, res) => {
         latest_period_pick_qty: periodMap.get(latestPeriodKey)?.pick_qty || 0,
       },
       signals: {
+        action_list: actionList,
         consistent_candidates: consistentCandidates,
         temporary_candidates: temporaryCandidates,
         volatility_watchlist: volatilityWatchlist,
         pc_review: pcReview,
         repeat_patterns: repeatPatterns,
+        new_movers: newMovers,
+        declining_skus: decliningSkus,
+        changed_since_previous_day: changedSincePreviousDay,
+        weekday_patterns: weekdayPatterns,
+        spike_sources: spikeSources,
+      },
+      pc_pressure: {
+        bin_sizes: pcPressureRows,
+        conflicts: pcPressureConflicts,
       },
       period_breakdown: periodBreakdown,
       sku_period_matrix: skuPeriodMatrix,

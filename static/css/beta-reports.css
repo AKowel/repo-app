@@ -35,6 +35,63 @@
   padding: 1rem;
 }
 
+.beta-detail-row {
+  cursor: pointer;
+}
+
+.beta-detail-row:hover td {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.beta-detail-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.beta-sku-label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: min(440px, 70vw);
+}
+
+.beta-sku-label strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.beta-sku-label span {
+  color: var(--text-soft);
+}
+
+.beta-detail-intro {
+  background: var(--surface, var(--color-surface));
+  border: 1px solid var(--border, var(--color-border));
+  border-radius: var(--radius);
+  margin: 0 0 1rem;
+  padding: 1rem;
+}
+
+.beta-detail-intro__sku {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: .35rem;
+}
+
+.beta-detail-intro__desc {
+  color: var(--text-soft);
+  line-height: 1.45;
+}
+
+.beta-detail-intro__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: .75rem;
+}
+
 .beta-score {
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -68,6 +125,74 @@
 .beta-score--neutral {
   background: var(--surface-2);
   color: var(--text);
+}
+
+.beta-rec,
+.beta-confidence,
+.beta-delta,
+.beta-pin {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  display: inline-flex;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
+.beta-rec--good,
+.beta-confidence--good,
+.beta-delta--good {
+  background: rgba(34, 197, 94, 0.11);
+  border-color: rgba(34, 197, 94, 0.28);
+  color: var(--success, #15803d);
+}
+
+.beta-rec--warn,
+.beta-confidence--warn {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.32);
+  color: #b45309;
+}
+
+.beta-rec--bad,
+.beta-confidence--bad,
+.beta-delta--bad {
+  background: rgba(239, 68, 68, 0.11);
+  border-color: rgba(239, 68, 68, 0.28);
+  color: var(--danger, #b91c1c);
+}
+
+.beta-rec--neutral,
+.beta-delta {
+  background: var(--surface-2);
+  color: var(--text-soft);
+}
+
+.beta-reasons {
+  display: grid;
+  gap: 3px;
+  max-width: 360px;
+}
+
+.beta-reasons span {
+  color: var(--text-soft);
+  line-height: 1.35;
+}
+
+.beta-pin {
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.beta-pin:hover,
+.beta-pin--on {
+  background: var(--accent-m);
+  border-color: rgba(255,255,255,.08);
+  color: var(--accent);
 }
 
 .beta-period-strip {

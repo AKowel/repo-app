@@ -96,6 +96,7 @@
           </label>
         </div>
         <button class="btn btn--primary btn--sm" id="bBtnLoad" style="align-self:flex-end">Reload</button>
+        <button class="btn btn--sm" id="bBtnExportActions" style="align-self:flex-end">Export actions</button>
       </div>
     </div>
   </div>
@@ -103,26 +104,52 @@
   <div class="card-edge reports-results-card beta-results-card" style="margin:0 24px;border-radius:0 0 var(--radius-lg) var(--radius-lg);border-left:1px solid var(--border);border-right:1px solid var(--border);border-bottom:1px solid var(--border)">
     <div class="tabrow" id="bTabs">
       <button class="tabbtn reports-tab-btn reports-tab-btn--active tabbtn--on" data-tab="overview">Overview</button>
+      <button class="tabbtn reports-tab-btn" data-tab="actions">Actions</button>
       <button class="tabbtn reports-tab-btn" data-tab="consistent">Consistent</button>
       <button class="tabbtn reports-tab-btn" data-tab="temporary">Temporary</button>
       <button class="tabbtn reports-tab-btn" data-tab="volatility">Volatility</button>
       <button class="tabbtn reports-tab-btn" data-tab="pc-review">PC Review</button>
       <button class="tabbtn reports-tab-btn" data-tab="patterns">Patterns</button>
+      <button class="tabbtn reports-tab-btn" data-tab="trends">Trends</button>
+      <button class="tabbtn reports-tab-btn" data-tab="pressure">Pressure</button>
+      <button class="tabbtn reports-tab-btn" data-tab="watchlist">Watchlist</button>
       <button class="tabbtn reports-tab-btn" data-tab="periods">Periods</button>
     </div>
     <div style="flex:1;overflow-y:auto">
       <div id="bTab-overview"    class="reports-tab-content reports-tab-content--active"></div>
+      <div id="bTab-actions"     class="reports-tab-content"></div>
       <div id="bTab-consistent"  class="reports-tab-content"></div>
       <div id="bTab-temporary"   class="reports-tab-content"></div>
       <div id="bTab-volatility"  class="reports-tab-content"></div>
       <div id="bTab-pc-review"   class="reports-tab-content"></div>
       <div id="bTab-patterns"    class="reports-tab-content"></div>
+      <div id="bTab-trends"      class="reports-tab-content"></div>
+      <div id="bTab-pressure"    class="reports-tab-content"></div>
+      <div id="bTab-watchlist"   class="reports-tab-content"></div>
       <div id="bTab-periods"     class="reports-tab-content"></div>
     </div>
   </div>
 
 </div>
 </div>
+</div>
+
+<div class="drawer-backdrop" id="bDetailDrawerBackdrop"></div>
+<div class="drawer" id="bDetailDrawer" role="dialog" aria-modal="true" aria-labelledby="bDetailDrawerTitle">
+  <div class="drawer__head">
+    <div>
+      <div class="drawer__title" id="bDetailDrawerTitle">Beta Report Detail</div>
+      <div class="drawer__subtitle" id="bDetailDrawerSubtitle"></div>
+    </div>
+    <button class="drawer__close" id="bDetailDrawerClose" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
+  <div class="drawer__body" id="bDetailDrawerBody">
+    <div class="loading-row"><div class="spinner"></div> Loading detail...</div>
+  </div>
 </div>
 
 <script src="/js/site.js?v=<%= assetVersion %>"></script>
