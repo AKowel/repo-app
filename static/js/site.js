@@ -71,8 +71,8 @@
 
   // ── Settings system ───────────────────────────────────────────────────
   var SETTING_DEFAULTS = {
-    'nav-layout':       'sidebar',
-    'empty-bin-layout': 'side-by-side'
+    'nav-layout':   'B',
+    'audit-layout': 'C'
   };
 
   function getSetting(key) {
@@ -80,7 +80,7 @@
   }
 
   function applySetting(key, value) {
-    document.documentElement.setAttribute('data-' + key, value);
+    document.documentElement.setAttribute('data-' + key, String(value || ''));
   }
 
   function saveSetting(key, value) {
@@ -90,7 +90,7 @@
 
   function syncSettingButtons() {
     document.querySelectorAll('[data-setting]').forEach(function (btn) {
-      btn.classList.toggle('settings-layout-btn--active', getSetting(btn.dataset.setting) === btn.dataset.value);
+      btn.classList.toggle('settings-option--active', getSetting(btn.dataset.setting) === btn.dataset.value);
     });
   }
 

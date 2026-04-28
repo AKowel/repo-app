@@ -13,58 +13,58 @@
   <nav class="sb__nav">
     <div class="sb__sec">Views</div>
 
-    <a href="/heatmap" class="ni<%= typeof activePage !== 'undefined' && activePage === 'heatmap' ? ' ni--active' : '' %>">
+    <a href="/heatmap" data-nav-id="heatmap" class="ni<%= typeof activePage !== 'undefined' && activePage === 'heatmap' ? ' ni--active' : '' %>">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
         <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
       </svg>
-      Heatmap
+      <span class="ni-label">Heatmap</span>
     </a>
 
-    <a href="/order-lines" class="ni<%= typeof activePage !== 'undefined' && activePage === 'order-lines' ? ' ni--active' : '' %>">
+    <a href="/order-lines" data-nav-id="orders" class="ni<%= typeof activePage !== 'undefined' && activePage === 'order-lines' ? ' ni--active' : '' %>">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
         <line x1="8" y1="18" x2="21" y2="18"/>
         <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
       </svg>
-      Order Lines
+      <span class="ni-label">Orders</span>
     </a>
 
-    <a href="/empty-bins" class="ni<%= typeof activePage !== 'undefined' && activePage === 'empty-bins' ? ' ni--active' : '' %>">
+    <a href="/empty-bins" data-nav-id="bins" class="ni<%= typeof activePage !== 'undefined' && activePage === 'empty-bins' ? ' ni--active' : '' %>">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 7h16"/><path d="M6 7v12h12V7"/><path d="M9 11h6"/><path d="M9 15h4"/><path d="M8 7V5h8v2"/>
       </svg>
-      Empty Bins
+      <span class="ni-label">Bins</span>
     </a>
 
-    <a href="/reports" class="ni<%= typeof activePage !== 'undefined' && activePage === 'reports' ? ' ni--active' : '' %>">
+    <a href="/reports" data-nav-id="reports" class="ni<%= typeof activePage !== 'undefined' && activePage === 'reports' ? ' ni--active' : '' %>">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
       </svg>
-      Reports
+      <span class="ni-label">Reports</span>
     </a>
 
-    <a href="/beta-reports" class="ni<%= typeof activePage !== 'undefined' && activePage === 'beta-reports' ? ' ni--active' : '' %>">
+    <a href="/beta-reports" data-nav-id="beta" class="ni<%= typeof activePage !== 'undefined' && activePage === 'beta-reports' ? ' ni--active' : '' %>">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 19V5"/><path d="M4 19h16"/>
         <path d="M8 15l3-3 3 2 5-7"/>
         <circle cx="8" cy="15" r="1"/><circle cx="11" cy="12" r="1"/><circle cx="14" cy="14" r="1"/><circle cx="19" cy="7" r="1"/>
       </svg>
-      (Beta) Reports
+      <span class="ni-label">β Reports</span>
     </a>
 
-    <a href="/query-console" class="ni<%= typeof activePage !== 'undefined' && activePage === 'query-console' ? ' ni--active' : '' %>">
+    <a href="/query-console" data-nav-id="sql" class="ni<%= typeof activePage !== 'undefined' && activePage === 'query-console' ? ' ni--active' : '' %>">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 6h16"/><path d="M4 18h16"/><path d="M8 12l-3 3 3 3"/><path d="M16 9l3 3-3 3"/><path d="M10 16l4-8"/>
       </svg>
-      SQL Console
+      <span class="ni-label">SQL</span>
     </a>
 
-    <a href="/admin" class="ni<%= typeof activePage !== 'undefined' && activePage === 'admin' ? ' ni--active' : '' %>">
+    <a href="/admin" data-nav-id="admin" class="ni<%= typeof activePage !== 'undefined' && activePage === 'admin' ? ' ni--active' : '' %>">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/>
       </svg>
-      Admin
+      <span class="ni-label">Admin</span>
     </a>
   </nav>
 

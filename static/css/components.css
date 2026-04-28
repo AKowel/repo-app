@@ -570,7 +570,7 @@
 .tbar-settings-btn:hover { color: var(--sb-text); background: rgba(255,255,255,0.06); }
 .tbar-settings-btn svg { width: 14px; height: 14px; }
 
-.settings-modal { width: min(480px, 92vw); }
+.settings-modal { width: min(520px, 92vw); }
 
 .settings-section {
   padding-bottom: 20px;
@@ -585,55 +585,99 @@
 }
 
 .settings-section__label {
-  font-size: 12px;
+  font-size: 9px;
   font-weight: 700;
-  color: var(--text);
-  margin-bottom: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-soft);
+  font-family: var(--mono);
+  margin-bottom: 4px;
 }
 
 .settings-section__hint {
   font-size: 11px;
   color: var(--text-soft);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
-.settings-layout-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.settings-layout-btn {
+/* Card-list option buttons (matching the design's SettingsScreen style) */
+.settings-option-list {
   display: flex;
   flex-direction: column;
+  gap: 6px;
+}
+
+.settings-option {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 14px 12px 12px;
-  border-radius: 8px;
-  border: 1.5px solid var(--border);
-  background: var(--surface-2);
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
   cursor: pointer;
-  color: var(--text-soft);
-  font-size: 11px;
-  font-weight: 600;
-  font-family: var(--sans);
-  transition: border-color 0.12s, background 0.12s, color 0.12s;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+  width: 100%;
 }
 
-.settings-layout-btn:hover {
+.settings-option:hover {
+  background: var(--surface-2);
   border-color: var(--border-strong);
-  color: var(--text);
 }
 
-.settings-layout-btn--active {
-  border-color: var(--accent);
+.settings-option--active {
   background: var(--accent-m);
-  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
-.settings-layout-preview {
-  width: 60px;
-  height: 40px;
-  display: block;
+.settings-option__text { flex: 1; min-width: 0; }
+
+.settings-option__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.settings-option--active .settings-option__name { color: var(--accent); }
+
+.settings-option__sub {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-soft);
+  line-height: 1.45;
+}
+
+/* Radio dot */
+.settings-option__radio {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  transition: border-color 0.15s;
+}
+
+.settings-option--active .settings-option__radio {
+  border-color: var(--accent);
+}
+
+.settings-option__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.settings-option--active .settings-option__dot {
+  opacity: 1;
+  transform: scale(1);
 }

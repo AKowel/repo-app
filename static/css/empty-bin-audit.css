@@ -659,3 +659,340 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ── Progress dots (used by layouts B & D) ──────────────────────────────── */
+.audit-pdots {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  justify-content: center;
+}
+
+.audit-pdot {
+  background: var(--border-strong);
+  border-radius: 999px;
+  flex-shrink: 0;
+  height: 6px;
+  transition: width .2s, background .2s;
+  width: 6px;
+}
+
+.audit-pdot--cur {
+  background: var(--accent);
+  width: 20px;
+}
+
+.audit-pdot--done {
+  background: var(--success, #22c55e);
+}
+
+.audit-pdot-ellipsis {
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+/* ── Dots navigation row ──────────────────────────────────────────────────── */
+.audit-dots-nav {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.audit-dots-nav__btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-soft);
+  flex-shrink: 0;
+  font-size: 18px;
+  height: 36px;
+  line-height: 1;
+  padding: 0 10px;
+}
+
+/* ── Layout A — Context-first (same as compact default) ─────────────────── */
+/* No extra styles needed — .audit-card--compact handles this */
+
+/* ── Layout B — Decision-first ──────────────────────────────────────────── */
+.audit-card--mobile-b {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 0 16px;
+}
+
+.audit-loc-hero {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 20px 16px 16px;
+  text-align: center;
+}
+
+.audit-loc-hero__label {
+  color: var(--text-soft);
+  font-size: 11px;
+  font-family: var(--mono);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.audit-loc-hero__code {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 42px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  line-height: 1;
+}
+
+.audit-loc-hero__sub {
+  color: var(--text-soft);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.audit-card--mobile-b .audit-callout {
+  margin: 0 12px;
+}
+
+.audit-card--mobile-b .audit-actions {
+  margin: 0 12px;
+}
+
+.audit-context-divider {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin: 4px 12px 0;
+}
+
+.audit-context-divider::before,
+.audit-context-divider::after {
+  background: var(--border);
+  content: "";
+  flex: 1;
+  height: 1px;
+}
+
+.audit-context-divider span {
+  color: var(--text-soft);
+  font-size: 10px;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.audit-card--mobile-b .audit-facts--3 {
+  margin: 0 12px;
+}
+
+.audit-card--mobile-b .audit-last {
+  margin: 0 12px;
+}
+
+.audit-card--mobile-b .audit-dots-nav {
+  margin: 0 12px;
+}
+
+.audit-card--mobile-b .audit-action--ghost {
+  background: transparent;
+  border: none;
+  color: var(--text-soft);
+  font-size: 12px;
+  margin: 0 12px;
+  padding: 6px 0;
+  text-align: center;
+}
+
+/* ── Layout C — Warehouse-visible ───────────────────────────────────────── */
+.audit-card--mobile-c {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - var(--mobile-nav-height, 64px) - env(safe-area-inset-bottom) - 56px);
+}
+
+.audit-mobile-topbar {
+  align-items: center;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+.audit-mobile-back {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+  text-decoration: none;
+}
+
+.audit-mobile-count {
+  color: var(--text-soft);
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.audit-c-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 12px;
+  padding: 14px;
+}
+
+.audit-location-xl {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 52px;
+  font-weight: 800;
+  letter-spacing: -.03em;
+  line-height: 1;
+}
+
+.audit-chip--ok {
+  background: rgba(34, 197, 94, .1);
+  border-color: rgba(34, 197, 94, .3);
+  color: var(--success, #15803d);
+}
+
+.audit-chip--warn {
+  background: rgba(239, 68, 68, .1);
+  border-color: rgba(239, 68, 68, .3);
+  color: var(--danger, #b91c1c);
+}
+
+.audit-actions--tall .audit-action {
+  min-height: 56px;
+}
+
+.audit-secondary-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.audit-note-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 0;
+}
+
+.audit-context-details {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.audit-context-summary {
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--mono);
+  list-style: none;
+  padding: 4px 0;
+  user-select: none;
+}
+
+.audit-context-summary::-webkit-details-marker {
+  display: none;
+}
+
+.audit-context-body {
+  padding-top: 10px;
+}
+
+.audit-card--mobile-c .audit-action--ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.audit-inputs--compact {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Layout D — Two-zone split ───────────────────────────────────────────── */
+.audit-card--mobile-d {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - var(--mobile-nav-height, 64px) - env(safe-area-inset-bottom) - 56px);
+}
+
+.audit-zone-context {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.audit-zone-decision {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  bottom: calc(var(--mobile-nav-height, 64px) + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  position: sticky;
+  z-index: 6;
+}
+
+.audit-zone-kicker {
+  color: var(--text-soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.audit-location--d {
+  font-size: 42px;
+  letter-spacing: -.02em;
+  line-height: 1;
+}
+
+.audit-zone-question {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.audit-binloc-status {
+  border-radius: 7px;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 8px 10px;
+}
+
+.audit-binloc-status--ok {
+  background: rgba(34, 197, 94, .1);
+  color: var(--success, #15803d);
+}
+
+.audit-binloc-status--warn {
+  background: rgba(239, 68, 68, .1);
+  color: var(--danger, #b91c1c);
+}
+
+.audit-zone-decision .audit-action--ghost {
+  background: transparent;
+  border: none;
+  color: var(--text-soft);
+  font-size: 12px;
+  padding: 4px 0;
+  text-align: center;
+}

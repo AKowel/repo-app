@@ -40,71 +40,83 @@
     </div>
     <div class="rmodal__body">
 
-      <!-- Nav Layout -->
+      <!-- Audit Card Layout -->
       <div class="settings-section">
-        <div class="settings-section__label">Navigation Layout</div>
-        <div class="settings-section__hint">Choose how the navigation is displayed across all pages</div>
-        <div class="settings-layout-grid">
+        <div class="settings-section__label">Audit card style</div>
+        <div class="settings-section__hint">Choose how locations are displayed during an empty-bin audit (mobile)</div>
+        <div class="settings-option-list">
 
-          <button class="settings-layout-btn" data-setting="nav-layout" data-value="sidebar">
-            <svg class="settings-layout-preview" viewBox="0 0 60 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="0.5" y="0.5" width="59" height="39" rx="3" stroke="currentColor" stroke-opacity="0.25"/>
-              <rect x="1" y="1" width="14" height="38" rx="2" fill="currentColor" fill-opacity="0.18"/>
-              <rect x="19" y="8"  width="34" height="2.5" rx="1" fill="currentColor" fill-opacity="0.28"/>
-              <rect x="19" y="15" width="26" height="2.5" rx="1" fill="currentColor" fill-opacity="0.15"/>
-              <rect x="19" y="22" width="30" height="2.5" rx="1" fill="currentColor" fill-opacity="0.15"/>
-              <rect x="19" y="29" width="20" height="2.5" rx="1" fill="currentColor" fill-opacity="0.15"/>
-            </svg>
-            <span>Sidebar</span>
+          <button class="settings-option" data-setting="audit-layout" data-value="A">
+            <div class="settings-option__text">
+              <div class="settings-option__name">A — Context-first</div>
+              <div class="settings-option__sub">Location in topbar, data leads, actions pinned at the bottom</div>
+            </div>
+            <div class="settings-option__radio"><div class="settings-option__dot"></div></div>
           </button>
 
-          <button class="settings-layout-btn" data-setting="nav-layout" data-value="bottom">
-            <svg class="settings-layout-preview" viewBox="0 0 60 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="0.5" y="0.5" width="59" height="39" rx="3" stroke="currentColor" stroke-opacity="0.25"/>
-              <rect x="5"  y="7"  width="50" height="2.5" rx="1" fill="currentColor" fill-opacity="0.28"/>
-              <rect x="5"  y="14" width="36" height="2.5" rx="1" fill="currentColor" fill-opacity="0.15"/>
-              <rect x="5"  y="21" width="42" height="2.5" rx="1" fill="currentColor" fill-opacity="0.15"/>
-              <rect x="1"  y="30" width="58" height="9"   rx="2" fill="currentColor" fill-opacity="0.18"/>
-            </svg>
-            <span>Bottom Bar</span>
+          <button class="settings-option" data-setting="audit-layout" data-value="B">
+            <div class="settings-option__text">
+              <div class="settings-option__name">B — Decision-first</div>
+              <div class="settings-option__sub">Location centred large, actions appear before context data</div>
+            </div>
+            <div class="settings-option__radio"><div class="settings-option__dot"></div></div>
+          </button>
+
+          <button class="settings-option" data-setting="audit-layout" data-value="C">
+            <div class="settings-option__text">
+              <div class="settings-option__name">C — Warehouse-visible</div>
+              <div class="settings-option__sub">Giant 52px location code readable at arm's length, progress dots in topbar</div>
+            </div>
+            <div class="settings-option__radio"><div class="settings-option__dot"></div></div>
+          </button>
+
+          <button class="settings-option" data-setting="audit-layout" data-value="D">
+            <div class="settings-option__text">
+              <div class="settings-option__name">D — Two-zone split</div>
+              <div class="settings-option__sub">Context scrolls independently, decision zone permanently pinned to bottom</div>
+            </div>
+            <div class="settings-option__radio"><div class="settings-option__dot"></div></div>
           </button>
 
         </div>
       </div>
 
-      <!-- Empty Bin Layout -->
+      <!-- Nav Layout -->
       <div class="settings-section">
-        <div class="settings-section__label">Empty Bin Layout</div>
-        <div class="settings-section__hint">Choose how the empty bin page panels are arranged</div>
-        <div class="settings-layout-grid">
+        <div class="settings-section__label">Navigation bar</div>
+        <div class="settings-section__hint">Choose which items appear in the mobile bottom navigation</div>
+        <div class="settings-option-list">
 
-          <button class="settings-layout-btn" data-setting="empty-bin-layout" data-value="side-by-side">
-            <svg class="settings-layout-preview" viewBox="0 0 60 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="0.5"  y="0.5" width="22" height="39" rx="2.5" stroke="currentColor" stroke-opacity="0.25" fill="currentColor" fill-opacity="0.1"/>
-              <rect x="25.5" y="0.5" width="34" height="39" rx="2.5" stroke="currentColor" stroke-opacity="0.25" fill="currentColor" fill-opacity="0.06"/>
-              <rect x="3"  y="6"  width="16" height="2" rx="1" fill="currentColor" fill-opacity="0.3"/>
-              <rect x="3"  y="11" width="13" height="2" rx="1" fill="currentColor" fill-opacity="0.18"/>
-              <rect x="3"  y="16" width="15" height="2" rx="1" fill="currentColor" fill-opacity="0.18"/>
-              <rect x="3"  y="21" width="12" height="2" rx="1" fill="currentColor" fill-opacity="0.18"/>
-              <rect x="28" y="6"  width="28" height="2" rx="1" fill="currentColor" fill-opacity="0.3"/>
-              <rect x="28" y="13" width="22" height="2" rx="1" fill="currentColor" fill-opacity="0.18"/>
-              <rect x="28" y="20" width="26" height="2" rx="1" fill="currentColor" fill-opacity="0.18"/>
-              <rect x="28" y="27" width="18" height="2" rx="1" fill="currentColor" fill-opacity="0.18"/>
-            </svg>
-            <span>Side by Side</span>
+          <button class="settings-option" data-setting="nav-layout" data-value="A">
+            <div class="settings-option__text">
+              <div class="settings-option__name">A — Full (6 items)</div>
+              <div class="settings-option__sub">All main pages visible: Heatmap, Orders, Bins, Reports, β Reports, Admin</div>
+            </div>
+            <div class="settings-option__radio"><div class="settings-option__dot"></div></div>
           </button>
 
-          <button class="settings-layout-btn" data-setting="empty-bin-layout" data-value="stacked">
-            <svg class="settings-layout-preview" viewBox="0 0 60 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="0.5" y="0.5"  width="59" height="17" rx="2.5" stroke="currentColor" stroke-opacity="0.25" fill="currentColor" fill-opacity="0.1"/>
-              <rect x="0.5" y="21.5" width="59" height="18" rx="2.5" stroke="currentColor" stroke-opacity="0.25" fill="currentColor" fill-opacity="0.06"/>
-              <rect x="4" y="5"  width="36" height="2" rx="1" fill="currentColor" fill-opacity="0.3"/>
-              <rect x="4" y="10" width="28" height="2" rx="1" fill="currentColor" fill-opacity="0.18"/>
-              <rect x="4" y="15" width="32" height="2" rx="1" fill="currentColor" fill-opacity="0.18"/>
-              <rect x="4" y="26" width="50" height="2" rx="1" fill="currentColor" fill-opacity="0.3"/>
-              <rect x="4" y="32" width="40" height="2" rx="1" fill="currentColor" fill-opacity="0.18"/>
-            </svg>
-            <span>Stacked</span>
+          <button class="settings-option" data-setting="nav-layout" data-value="B">
+            <div class="settings-option__text">
+              <div class="settings-option__name">B — Balanced (5 items)</div>
+              <div class="settings-option__sub">Heatmap, Orders, Bins, Reports, Admin — β Reports and SQL tucked away</div>
+            </div>
+            <div class="settings-option__radio"><div class="settings-option__dot"></div></div>
+          </button>
+
+          <button class="settings-option" data-setting="nav-layout" data-value="C">
+            <div class="settings-option__text">
+              <div class="settings-option__name">C — Minimal (4 items)</div>
+              <div class="settings-option__sub">Bins, Reports, Heatmap, Admin — maximum screen real estate</div>
+            </div>
+            <div class="settings-option__radio"><div class="settings-option__dot"></div></div>
+          </button>
+
+          <button class="settings-option" data-setting="nav-layout" data-value="D">
+            <div class="settings-option__text">
+              <div class="settings-option__name">D — Icon-only slim</div>
+              <div class="settings-option__sub">5 items, no labels — reclaims vertical height for content</div>
+            </div>
+            <div class="settings-option__radio"><div class="settings-option__dot"></div></div>
           </button>
 
         </div>

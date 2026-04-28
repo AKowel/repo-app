@@ -790,61 +790,50 @@ body {
   }
 }
 
-/* ── Nav layout: Bottom Bar (user preference, applied on desktop too) ── */
-[data-nav-layout="bottom"] .app-shell {
-  display: block;
-  height: 100vh;
-  height: 100dvh;
-}
+/* ── Mobile nav layout variants (A/B/C/D, user preference) ──────────── */
+/*
+ * A = Full 6 items  (heatmap, orders, bins, reports, beta, admin)
+ * B = Balanced 5    (heatmap, orders, bins, reports, admin) — DEFAULT
+ * C = Minimal 4     (heatmap, bins, reports, admin)
+ * D = Icon-only 5   (same items as B but no labels, slim height)
+ *
+ * These rules only apply inside the mobile breakpoint so desktop is unaffected.
+ */
+@media (max-width: 1024px) {
+  /* Layout A — show 6 items (hide SQL only) */
+  [data-nav-layout="A"] .sb__nav {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  [data-nav-layout="A"] .ni[data-nav-id="sql"] { display: none; }
 
-[data-nav-layout="bottom"] .sb {
-  position: fixed;
-  inset: auto 0 0 0;
-  z-index: 250;
-  width: 100%;
-  min-width: 0;
-  height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
-  padding-bottom: env(safe-area-inset-bottom);
-  border-right: 0;
-  border-top: 1px solid var(--sb-border);
-  box-shadow: 0 -10px 30px rgba(0,0,0,0.22);
-}
+  /* Layout B — show 5 items (hide beta + SQL) */
+  [data-nav-layout="B"] .sb__nav {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  [data-nav-layout="B"] .ni[data-nav-id="beta"],
+  [data-nav-layout="B"] .ni[data-nav-id="sql"] { display: none; }
 
-[data-nav-layout="bottom"] .sb__brand,
-[data-nav-layout="bottom"] .sb__sec,
-[data-nav-layout="bottom"] .sb__bot {
-  display: none;
-}
+  /* Layout C — show 4 items (hide orders, beta, SQL) */
+  [data-nav-layout="C"] .sb__nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  [data-nav-layout="C"] .ni[data-nav-id="orders"],
+  [data-nav-layout="C"] .ni[data-nav-id="beta"],
+  [data-nav-layout="C"] .ni[data-nav-id="sql"] { display: none; }
 
-[data-nav-layout="bottom"] .sb__nav {
-  flex: none;
-  height: var(--mobile-nav-height);
-  padding: 6px 8px;
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 4px;
-  overflow: visible;
-}
-
-[data-nav-layout="bottom"] .ni {
-  justify-content: center;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-  padding: 6px 4px;
-  border-radius: 7px;
-  font-size: 8px;
-  line-height: 1.1;
-  text-align: center;
-}
-
-[data-nav-layout="bottom"] .ni svg {
-  width: 18px;
-  height: 18px;
-}
-
-[data-nav-layout="bottom"] .main {
-  height: 100vh;
-  height: 100dvh;
-  padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
+  /* Layout D — icon-only slim (same items as B, no labels, shorter bar) */
+  [data-nav-layout="D"] .sb__nav {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    height: 52px;
+  }
+  [data-nav-layout="D"] .sb {
+    height: calc(52px + env(safe-area-inset-bottom));
+  }
+  [data-nav-layout="D"] .main {
+    padding-bottom: calc(52px + env(safe-area-inset-bottom));
+  }
+  [data-nav-layout="D"] .ni[data-nav-id="beta"],
+  [data-nav-layout="D"] .ni[data-nav-id="sql"] { display: none; }
+  [data-nav-layout="D"] .ni-label { display: none; }
+  [data-nav-layout="D"] .ni { gap: 0; }
 }

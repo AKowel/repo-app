@@ -333,18 +333,6 @@
   width: 100%;
 }
 
-/* ── Empty bin layout: Stacked (user preference) ────────────────────── */
-[data-empty-bin-layout="stacked"] .empty-bin-grid {
-  grid-template-columns: 1fr;
-}
-
-[data-empty-bin-layout="stacked"] .empty-task-list {
-  max-height: 320px;
-}
-
-[data-empty-bin-layout="stacked"] .empty-bin-panel--main .card {
-  min-height: auto;
-}
 
 @media (max-width: 1024px) {
   .empty-bin-grid {

@@ -718,6 +718,235 @@ function renderAuditControls({ pending, compactLayout, actionsMarkup }) {
   `;
 }
 
+// ── Mobile audit layout helpers ──────────────────────────────────────────
+
+function getAuditLayout() {
+  // Desktop always uses the standard layout regardless of setting
+  if (!isCompactAuditLayout()) return "desktop";
+  return document.documentElement.getAttribute("data-audit-layout") || "C";
+}
+
+function renderProgressDots() {
+  const total = auditItems.length;
+  if (!total) return '<div class="audit-pdots"></div>';
+  const MAX = 9;
+  const show = Math.min(total, MAX);
+  const half = Math.floor(show / 2);
+  const start = Math.max(0, Math.min(currentIndex - half, total - show));
+  const end = start + show;
+  let html = start > 0 ? '<span class="audit-pdot-ellipsis">‹</span>' : "";
+  for (let i = start; i < end; i++) {
+    const isCur = i === currentIndex;
+    const isDone = auditItems[i]?.status && auditItems[i].status !== "pending";
+    const cls = isCur ? "audit-pdot audit-pdot--cur" : isDone ? "audit-pdot audit-pdot--done" : "audit-pdot";
+    html += `<span class="${cls}"></span>`;
+  }
+  if (end < total) html += '<span class="audit-pdot-ellipsis">›</span>';
+  return `<div class="audit-pdots">${html}</div>`;
+}
+
+// Layout B — Decision-first: big location, actions above context
+function renderMobileB(item, params) {
+  const { pending, isClearingTask, liveQty, liveSku, txItem, txUser, txReason,
+          localSyncNote, actionButtons, photoReady, draftNote, photoStatusText } = params;
+  const liveOk = item.live?.live_empty !== false;
+  const total = auditItems.length;
+
+  return `
+    <section class="audit-card audit-card--compact audit-card--mobile-b" data-current-location="${escAttr(item.location)}">
+      <div class="audit-loc-hero">
+        <div class="audit-loc-hero__label">Location ${currentIndex + 1} of ${total}</div>
+        <div class="audit-loc-hero__code">${escHtml(item.location)}</div>
+        <div class="audit-loc-hero__sub">${escHtml(item.operating_area || "")} · ${escHtml(item.bin_size || "")} · L${escHtml(item.level || "-")}</div>
+      </div>
+
+      <div class="audit-callout ${liveOk ? "audit-callout--ok" : "audit-callout--warn"}">
+        <div class="audit-callout__title">${escHtml(liveOk ? "✓ BINLOC confirms: still empty" : "⚠ BINLOC shows stock in this location")}</div>
+        <div class="audit-callout__meta">Live qty: ${escHtml(liveQty)} · ${escHtml(liveOk ? "No SKU assigned" : `SKU: ${liveSku}`)}</div>
+      </div>
+
+      ${pending ? `
+        <div class="audit-actions">${actionButtons}</div>
+
+        <div class="audit-context-divider"><span>Context</span></div>
+
+        <div class="audit-facts audit-facts--3">
+          ${renderFact("Last item", txItem)}
+          ${renderFact("Last user", txUser)}
+          ${renderFact("Live qty", liveQty, "strong")}
+        </div>
+        <div class="audit-last">${escHtml("Reason: " + txReason)}</div>
+
+        ${renderAuditTools(item, { compactLayout: true, photoReady, photoStatusText, draftNote })}
+
+        <div class="audit-dots-nav">
+          <button class="audit-dots-nav__btn" data-nav-action="prev">‹</button>
+          ${renderProgressDots()}
+          <button class="audit-dots-nav__btn" data-nav-action="next">›</button>
+        </div>
+        <button class="audit-action audit-action--ghost" data-check-action="skipped">Skip</button>
+      ` : `
+        <div class="audit-last">This location is already marked as ${escHtml(statusLabel(item.status))}.</div>
+        ${renderAuditControls({ pending: false, compactLayout: true, actionsMarkup: "" })}
+      `}
+
+      ${localSyncNote}
+      ${renderPhotos(item)}
+    </section>
+
+    ${pendingCount(auditItems) === 0 ? `
+      <section class="audit-empty">
+        <p>No pending locations remain.</p>
+        <div class="audit-complete-actions">
+          <button class="btn btn--primary" data-task-action="complete">${escHtml(isClearingTask ? "Finish clearing task" : "Finish audit")}</button>
+        </div>
+      </section>
+    ` : ""}
+    ${renderQueue()}
+  `;
+}
+
+// Layout C — Warehouse-visible: giant 52px location, status chips, tall action buttons
+function renderMobileC(item, params) {
+  const { pending, isClearingTask, liveQty, liveSku, txItem, txUser, txReason, txDate,
+          localSyncNote, actionButtons, photoReady, draftNote, photoStatusText } = params;
+  const liveOk = item.live?.live_empty !== false;
+  const total = auditItems.length;
+
+  return `
+    <section class="audit-card audit-card--mobile-c" data-current-location="${escAttr(item.location)}">
+      <div class="audit-mobile-topbar">
+        <a href="/empty-bins" class="audit-mobile-back">‹ Back</a>
+        ${renderProgressDots()}
+        <span class="audit-mobile-count">${currentIndex + 1}/${total}</span>
+      </div>
+
+      <div class="audit-c-body">
+        <div class="audit-location-xl">${escHtml(item.location)}</div>
+        <div class="audit-subline">${escHtml(item.operating_area || "")} · ${escHtml(item.bin_size || "")} · L${escHtml(item.level || "-")}</div>
+
+        <div class="audit-chip-row">
+          <span class="audit-chip ${liveOk ? "audit-chip--ok" : "audit-chip--warn"}">${escHtml(liveOk ? "✓ BINLOC: empty" : "⚠ BINLOC: has stock")}</span>
+          <span class="audit-chip">Qty: ${escHtml(liveQty)}</span>
+          <span class="audit-status audit-status--${escAttr(statusTone(item.status))}">${escHtml(statusLabel(item.status))}</span>
+        </div>
+
+        ${pending ? `
+          <div class="audit-actions audit-actions--tall">${actionButtons}</div>
+
+          <div class="audit-secondary-row">
+            <button class="audit-action audit-action--ghost" data-check-action="skipped">Skip</button>
+            <button class="audit-note-btn" type="button" data-tools-toggle>${noteToolsExpanded ? "Hide note" : "+ Note / Photo"}</button>
+          </div>
+
+          ${noteToolsExpanded ? `
+            <div class="audit-inputs audit-inputs--compact">
+              <textarea class="fi audit-note" id="auditNote" placeholder="Optional note">${escHtml(draftNote)}</textarea>
+              <div class="audit-photo-picker">
+                <button class="audit-camera-btn" type="button" data-photo-trigger>Take photo</button>
+                <input id="auditPhoto" type="file" accept="image/*" capture="environment" hidden />
+                <div class="audit-photo-status" id="auditPhotoStatus" data-tone="${photoReady ? "ready" : ""}">${escHtml(photoReady && preparedPhoto?.timestamp ? `Photo ready | ${preparedPhoto.timestamp}` : "No photo attached")}</div>
+                <div class="audit-photo-preview" id="auditPhotoPreview">${photoReady ? `<img src="${escAttr(preparedPhoto.dataUrl)}" alt="Compressed audit photo preview">` : ""}</div>
+              </div>
+            </div>
+          ` : ""}
+
+        ` : `
+          <div class="audit-last">This location is already marked as ${escHtml(statusLabel(item.status))}.</div>
+          ${renderAuditControls({ pending: false, compactLayout: true, actionsMarkup: "" })}
+        `}
+
+        <details class="audit-context-details">
+          <summary class="audit-context-summary">${escHtml(txItem)} · ${escHtml(txUser)} · ${escHtml(txReason)} ▾</summary>
+          <div class="audit-context-body">
+            <div class="audit-facts audit-facts--3">
+              ${renderFact("Last item", txItem)}
+              ${renderFact("Last user", txUser)}
+              ${renderFact("Last time", txDate)}
+            </div>
+          </div>
+        </details>
+
+        ${localSyncNote}
+        ${renderPhotos(item)}
+      </div>
+    </section>
+
+    ${pendingCount(auditItems) === 0 ? `
+      <section class="audit-empty">
+        <p>No pending locations remain.</p>
+        <div class="audit-complete-actions">
+          <button class="btn btn--primary" data-task-action="complete">${escHtml(isClearingTask ? "Finish clearing task" : "Finish audit")}</button>
+        </div>
+      </section>
+    ` : ""}
+    ${renderQueue()}
+  `;
+}
+
+// Layout D — Two-zone split: scrollable context + pinned decision zone
+function renderMobileD(item, params) {
+  const { pending, isClearingTask, liveQty, txItem, txUser, txReason, txDate, sourceCallout,
+          localSyncNote, actionButtons, photoReady, draftNote, photoStatusText } = params;
+  const liveOk = item.live?.live_empty !== false;
+  const total = auditItems.length;
+  const questionText = isClearingTask ? "Has this location been cleared?" : "Is this location still empty?";
+  const binlocText = liveOk
+    ? `✓ Live BINLOC shows: empty · qty 0`
+    : `⚠ Live BINLOC shows stock · qty ${liveQty}`;
+
+  return `
+    <section class="audit-card audit-card--mobile-d" data-current-location="${escAttr(item.location)}">
+      <div class="audit-zone-context">
+        <div class="audit-zone-kicker">${escHtml(isClearingTask ? "Clearing" : "Audit")} · ${currentIndex + 1} of ${total}</div>
+        <div class="audit-location audit-location--d">${escHtml(item.location)}</div>
+        <div class="audit-subline">${escHtml(item.operating_area || "")} · L${escHtml(item.level || "-")} · ${escHtml(item.bin_size || "")}</div>
+
+        <div class="audit-facts audit-facts--3">
+          ${renderFact("Live qty", liveQty, "strong")}
+          ${renderFact("Last item", txItem)}
+          ${renderFact("Last user", txUser)}
+        </div>
+        <div class="audit-last">${escHtml("Reason: " + txReason + " · " + txDate)}</div>
+        <div class="audit-last">${escHtml(sourceCallout)}</div>
+
+        ${pending ? renderAuditTools(item, { compactLayout: true, photoReady, photoStatusText, draftNote }) : ""}
+        ${localSyncNote}
+        ${renderPhotos(item)}
+      </div>
+
+      ${pending ? `
+        <div class="audit-zone-decision">
+          <div class="audit-zone-question">${escHtml(questionText)}</div>
+          <div class="audit-binloc-status ${liveOk ? "audit-binloc-status--ok" : "audit-binloc-status--warn"}">${escHtml(binlocText)}</div>
+          <div class="audit-actions">${actionButtons}</div>
+          <div class="audit-dots-nav">
+            <button class="audit-dots-nav__btn" data-nav-action="prev">‹</button>
+            ${renderProgressDots()}
+            <button class="audit-dots-nav__btn" data-nav-action="next">›</button>
+          </div>
+          <button class="audit-action audit-action--ghost" data-check-action="skipped">Skip</button>
+        </div>
+      ` : `
+        <div class="audit-zone-decision">
+          <div class="audit-last">This location is already marked as ${escHtml(statusLabel(item.status))}.</div>
+          ${renderAuditControls({ pending: false, compactLayout: true, actionsMarkup: "" })}
+        </div>
+      `}
+    </section>
+
+    ${pendingCount(auditItems) === 0 ? `
+      <section class="audit-empty">
+        <p>No pending locations remain.</p>
+        <div class="audit-complete-actions">
+          <button class="btn btn--primary" data-task-action="complete">${escHtml(isClearingTask ? "Finish clearing task" : "Finish audit")}</button>
+        </div>
+      </section>
+    ` : ""}
+    ${renderQueue()}
+  `;
+}
+
 function renderCurrent() {
   setHeader();
   const item = currentItem();
@@ -777,6 +1006,16 @@ function renderCurrent() {
   const actionButtons = actions
     .map(([action, label]) => `<button class="audit-action ${action === "empty" || action === "cleared" ? "audit-action--primary" : ""}" data-check-action="${escAttr(action)}">${escHtml(label)}</button>`)
     .join("");
+
+  const auditLayout = getAuditLayout();
+  const mobileParams = {
+    pending, isClearingTask, liveQty, liveSku, txItem, txUser, txReason, txDate,
+    sourceCallout, localSyncNote, actionButtons, photoReady, draftNote, photoStatusText,
+    decisionCopy, liveCallout
+  };
+  if (auditLayout === "B") { $("auditMain").innerHTML = renderMobileB(item, mobileParams); return; }
+  if (auditLayout === "C") { $("auditMain").innerHTML = renderMobileC(item, mobileParams); return; }
+  if (auditLayout === "D") { $("auditMain").innerHTML = renderMobileD(item, mobileParams); return; }
 
   $("auditMain").innerHTML = `
     <section class="audit-card ${compactLayout ? "audit-card--compact" : ""}" data-current-location="${escAttr(item.location)}">
