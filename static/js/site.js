@@ -69,6 +69,70 @@
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
+  // ── Settings system ───────────────────────────────────────────────────
+  var SETTING_DEFAULTS = {
+    'nav-layout':       'sidebar',
+    'empty-bin-layout': 'side-by-side'
+  };
+
+  function getSetting(key) {
+    return localStorage.getItem('repo-setting-' + key) || SETTING_DEFAULTS[key];
+  }
+
+  function applySetting(key, value) {
+    document.documentElement.setAttribute('data-' + key, value);
+  }
+
+  function saveSetting(key, value) {
+    localStorage.setItem('repo-setting-' + key, value);
+    applySetting(key, value);
+  }
+
+  function syncSettingButtons() {
+    document.querySelectorAll('[data-setting]').forEach(function (btn) {
+      btn.classList.toggle('settings-layout-btn--active', getSetting(btn.dataset.setting) === btn.dataset.value);
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    // Apply all settings (data attrs are set in <head> to prevent flash;
+    // this ensures JS state stays in sync after any dynamic DOM changes)
+    Object.keys(SETTING_DEFAULTS).forEach(function (key) {
+      applySetting(key, getSetting(key));
+    });
+
+    // Settings modal open/close
+    var backdrop = document.getElementById('settingsBackdrop');
+    var settingsBtn = document.getElementById('settingsBtn');
+    var settingsClose = document.getElementById('settingsClose');
+
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', function () {
+        syncSettingButtons();
+        if (backdrop) backdrop.hidden = false;
+      });
+    }
+    if (settingsClose) {
+      settingsClose.addEventListener('click', function () { if (backdrop) backdrop.hidden = true; });
+    }
+    if (backdrop) {
+      backdrop.addEventListener('click', function (e) {
+        if (e.target === backdrop) backdrop.hidden = true;
+      });
+      backdrop.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') backdrop.hidden = true;
+      });
+    }
+
+    // Settings choice buttons
+    document.querySelectorAll('[data-setting]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        saveSetting(btn.dataset.setting, btn.dataset.value);
+        syncSettingButtons();
+      });
+    });
+  });
+
   var CLIENT_CHANNELS = {
     FANDMKET: {
       B: "Build Your Own",

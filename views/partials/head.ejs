@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title><%= typeof pageTitle !== 'undefined' ? pageTitle + ' — ' : '' %><%= appName %></title>
 
-  <!-- Apply saved theme before first paint to prevent flash -->
+  <!-- Apply saved theme + layout settings before first paint to prevent flash -->
   <script>
     (function () {
       var VALID = ['carbon','terminal','ember','light','frost','warm'];
@@ -14,6 +14,10 @@
       if (LEGACY[t] && !VALID.includes(t)) t = LEGACY[t];
       if (!VALID.includes(t)) t = 'carbon';
       document.documentElement.setAttribute('data-theme', t);
+
+      var h = document.documentElement;
+      h.setAttribute('data-nav-layout',       localStorage.getItem('repo-setting-nav-layout')       || 'sidebar');
+      h.setAttribute('data-empty-bin-layout', localStorage.getItem('repo-setting-empty-bin-layout') || 'side-by-side');
     })();
   </script>
 

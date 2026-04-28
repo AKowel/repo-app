@@ -789,3 +789,62 @@ body {
     width: auto;
   }
 }
+
+/* ── Nav layout: Bottom Bar (user preference, applied on desktop too) ── */
+[data-nav-layout="bottom"] .app-shell {
+  display: block;
+  height: 100vh;
+  height: 100dvh;
+}
+
+[data-nav-layout="bottom"] .sb {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 250;
+  width: 100%;
+  min-width: 0;
+  height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  border-right: 0;
+  border-top: 1px solid var(--sb-border);
+  box-shadow: 0 -10px 30px rgba(0,0,0,0.22);
+}
+
+[data-nav-layout="bottom"] .sb__brand,
+[data-nav-layout="bottom"] .sb__sec,
+[data-nav-layout="bottom"] .sb__bot {
+  display: none;
+}
+
+[data-nav-layout="bottom"] .sb__nav {
+  flex: none;
+  height: var(--mobile-nav-height);
+  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  overflow: visible;
+}
+
+[data-nav-layout="bottom"] .ni {
+  justify-content: center;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 6px 4px;
+  border-radius: 7px;
+  font-size: 8px;
+  line-height: 1.1;
+  text-align: center;
+}
+
+[data-nav-layout="bottom"] .ni svg {
+  width: 18px;
+  height: 18px;
+}
+
+[data-nav-layout="bottom"] .main {
+  height: 100vh;
+  height: 100dvh;
+  padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
+}
